@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AGENT_DEFS } from '../../runtimes/registry.js';
+import type { PromptMode } from '../../prompts/passthrough.js';
 
 import type {
   OdNextRolloutDecision,
@@ -35,6 +36,20 @@ export interface OdNextRolloutPolicy {
   eligibleAgents: readonly string[];
   productionActiveApproved: boolean;
   localSyntheticCanary: boolean;
+}
+
+/** Prompt passthrough is a hard boundary: rollout flags cannot re-enable OD Next. */
+export function constrainOdNextPolicyForPromptMode(
+  policy: OdNextRolloutPolicy,
+  promptMode: PromptMode,
+): OdNextRolloutPolicy {
+  if (promptMode === 'open-design') return policy;
+  return {
+    ...policy,
+    requestedMode: 'off',
+    contentEnabled: false,
+    behaviorEnabled: false,
+  };
 }
 
 const DEFAULT_TASK_TYPES: readonly OdNextRolloutTaskType[] = [

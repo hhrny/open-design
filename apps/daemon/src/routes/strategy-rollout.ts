@@ -2,9 +2,12 @@ import type { Express, RequestHandler } from 'express';
 import type { OdNextRolloutControlResponse } from '@open-design/contracts';
 
 import {
+  constrainOdNextPolicyForPromptMode,
+  readOdNextRolloutPolicy,
   readOdNextRolloutControlStatus,
   type OdNextRolloutAppConfig,
 } from '../strategies/od-next/rollout.js';
+import { readPromptMode } from '../prompts/passthrough.js';
 
 /** Read-only engineering status: the active default or an environment override.
  * Legacy saved preferences remain readable for compatibility but no longer
@@ -22,11 +25,19 @@ export function registerStrategyRolloutRoutes(app: Express, deps: {
     '/api/strategies/od-next/rollout',
     deps.requireLocalDaemonRequest,
     async (_req, res) => {
+      const preference = await deps.readOdNextPreference();
+      const promptMode = readPromptMode(process.env);
+      const status = readOdNextRolloutControlStatus(process.env, preference);
+      const constrained = constrainOdNextPolicyForPromptMode(
+        readOdNextRolloutPolicy(process.env, preference),
+        promptMode,
+      );
       const body: OdNextRolloutControlResponse = {
-        status: readOdNextRolloutControlStatus(
-          process.env,
-          await deps.readOdNextPreference(),
-        ),
+        status: {
+          ...status,
+          requestedMode: constrained.requestedMode,
+          effectiveMode: promptMode === 'passthrough' ? 'off' : status.effectiveMode,
+        },
       };
       res.json(body);
     },

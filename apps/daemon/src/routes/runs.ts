@@ -111,10 +111,12 @@ import {
   type OdNextTaskInputSnapshotDescriptor,
 } from '../strategies/od-next/task-input-snapshot.js';
 import {
+  constrainOdNextPolicyForPromptMode,
   evaluateOdNextRollout,
   readOdNextRolloutPolicy,
   type OdNextRolloutDecision,
 } from '../strategies/od-next/rollout.js';
+import { readPromptMode } from '../prompts/passthrough.js';
 import { odNextRolloutAnalyticsProperties } from '../strategies/od-next/rollout-analytics.js';
 import {
   buildConnectorProbe,
@@ -1697,7 +1699,10 @@ export function registerRunRoutes(app: Express, ctx: RegisterRunRoutesDeps) {
       // Subsequent requests use the current policy, including older conversations.
       // In-flight physical runs and idempotent retries keep their frozen bundle.
       const rolloutAppConfig = await readAppConfig(RUNTIME_DATA_DIR);
-      const rolloutPolicy = readOdNextRolloutPolicy(process.env, rolloutAppConfig);
+      const rolloutPolicy = constrainOdNextPolicyForPromptMode(
+        readOdNextRolloutPolicy(process.env, rolloutAppConfig),
+        readPromptMode(process.env),
+      );
       const rolloutTaskType = !explicitUserPlugin ? 'discovery' as const : null;
       const routeApplicability = explicitUserPlugin
         ? 'explicit_user' as const

@@ -71,6 +71,11 @@ import {
   serializeStableSections,
   type StableSectionHashes,
 } from './prompts/stable-sections.js';
+import {
+  composePassthroughPrompt,
+  readPromptMode,
+  resolvePassthroughTurn,
+} from './prompts/passthrough.js';
 import { emittedRenderableQuestionForm } from './question-form-detect.js';
 import { resolveProjectRoot } from './project-root.js';
 import { OPEN_DESIGN_PLUGIN_ID } from './mcp-observability.js';
@@ -11582,6 +11587,8 @@ export async function startServer({
   const startChatRun = async (chatBody, run) => {
     const lifecycle = createRunLifecycleTracer(run);
     lifecycle.mark('chat_run_started');
+    const promptMode = readPromptMode(process.env);
+    const passthroughPrompts = promptMode === 'passthrough';
     const pendingNativeSessionContinue =
       run.nativeSessionContinuePending &&
       typeof run.nativeSessionContinuePending.sessionId === 'string'
@@ -11642,7 +11649,11 @@ export async function startServer({
       );
     }
     let persistedStrategyFinalText = strategyRunMapping?.finalText.text ?? null;
-    const isOdNextInitialRun = Boolean(strategyTaskAtStart && isInitialStrategyTaskRun(strategyTaskAtStart, run.id));
+    const isOdNextInitialRun = Boolean(
+      !passthroughPrompts
+      && strategyTaskAtStart
+      && isInitialStrategyTaskRun(strategyTaskAtStart, run.id),
+    );
     let discoveryPromptRecorded = false;
     const recordDiscoveryPromptDelivered = () => {
       if (discoveryPromptRecorded || !strategyTaskAtStart?.promptBundle.text.includes('skill_name="discovery"')) return;
@@ -11658,7 +11669,7 @@ export async function startServer({
       chatBody,
       'currentPrompt',
     );
-    const strategyProtocol = strategyTaskAtStart
+    const strategyProtocol = !passthroughPrompts && strategyTaskAtStart
       ? createOdNextRunProtocol(strategyRunMapping, run.doneKey ?? '')
       : null;
     let strategyProtocolResult = null;
@@ -11841,6 +11852,7 @@ export async function startServer({
     // turn's prompt. Failures are swallowed — memory is best-effort and
     // must never block the agent run.
     if (
+      !passthroughPrompts &&
       (run.retryAttemptCount ?? 0) === 0 &&
       typeof message === 'string' &&
       message.trim().length > 0
@@ -11880,7 +11892,7 @@ export async function startServer({
         }
         cwd = null;
       }
-      if (cwd) {
+      if (cwd && !passthroughPrompts) {
         try {
           existingProjectFiles = await listFiles(PROJECTS_DIR, projectId, { metadata: chatMeta });
         } catch {
@@ -11982,21 +11994,25 @@ export async function startServer({
         ? skillId
         : projectRecord?.skillId,
     );
-    const runContextPrompt = renderRunContextPrompt(context, projectRecord?.metadata);
+    const normalizedRunContext = normalizeRunContextSelection(context);
+    const passthroughWorkspaceItems = normalizedRunContext.workspaceItems ?? [];
+    const runContextPrompt = passthroughPrompts
+      ? ''
+      : renderRunContextPrompt(context, projectRecord?.metadata);
     const linkedDirs = (() => {
       if (!Array.isArray(projectRecord?.metadata?.linkedDirs)) return [];
       const v = validateLinkedDirs(projectRecord.metadata.linkedDirs);
       return v.dirs ?? [];
     })();
-    const cwdHint = cwd
+    const cwdHint = !passthroughPrompts && cwd
       ? formatDesignFilesWorkspaceHint(cwd, existingProjectFiles, existingProjectFolders)
       : '';
-    const linkedDirsHint = linkedDirs.length > 0
+    const linkedDirsHint = !passthroughPrompts && linkedDirs.length > 0
       ? `\n\nLinked code folders (read-only reference code the user wants you to see):\n${
           linkedDirs.map((d) => `- \`${d}\``).join('\n')
         }`
       : '';
-    const attachmentHint = formatProjectAttachmentHint(safeAttachments);
+    const attachmentHint = passthroughPrompts ? '' : formatProjectAttachmentHint(safeAttachments);
     // Plan §3.A3 / spec §9: thread plugin context onto every tool token
     // so the connector execute route can re-validate the §5.3
     // capability gate without re-reading the SQLite snapshot row.
@@ -12073,8 +12089,12 @@ export async function startServer({
         activeChatRunHandles.delete(sinkRunId);
       };
     }
-    const runtimeToolPrompt = createAgentRuntimeToolPrompt(daemonUrl, toolTokenGrant);
-    const commentHint = renderCommentAttachmentHint(safeCommentAttachments);
+    const runtimeToolPrompt = passthroughPrompts
+      ? ''
+      : createAgentRuntimeToolPrompt(daemonUrl, toolTokenGrant);
+    const commentHint = passthroughPrompts
+      ? ''
+      : renderCommentAttachmentHint(safeCommentAttachments);
 
     // Resolve external MCP config + stored OAuth tokens up-front so the
     // system prompt can warn the model away from Claude Code's synthetic
@@ -12172,18 +12192,42 @@ export async function startServer({
           extractUserAuthoredSignalText(message),
           extractUserAuthoredSignalText(currentPrompt),
         ];
-    const freshIntentSignals = {
-      deck: detectDeckIntentSignal(...intentSignalTexts),
-      media: detectMediaIntentSignal(...intentSignalTexts),
-      platform: detectPlatformIntentSignal(...intentSignalTexts),
-      devicePlatform: detectOdNextDevicePlatformFromText(...intentSignalTexts),
-    };
+    const freshIntentSignals = passthroughPrompts
+      ? { deck: false, media: false, platform: false, devicePlatform: null }
+      : {
+          deck: detectDeckIntentSignal(...intentSignalTexts),
+          media: detectMediaIntentSignal(...intentSignalTexts),
+          platform: detectPlatformIntentSignal(...intentSignalTexts),
+          devicePlatform: detectOdNextDevicePlatformFromText(...intentSignalTexts),
+        };
     const intentSignals =
-      !legacyIntentSignalScan && typeof run.conversationId === 'string' && run.conversationId
+      !passthroughPrompts
+      && !legacyIntentSignalScan
+      && typeof run.conversationId === 'string'
+      && run.conversationId
         ? latchConversationIntentSignals(db, run.conversationId, freshIntentSignals)
         : freshIntentSignals;
 
-    const promptContext = strategyTaskAtStart
+    const promptContext = passthroughPrompts
+      ? {
+          prompt: '',
+          activeSkillDirs: [],
+          critiqueShouldRun: false,
+          designSystemSelection: {
+            id: null,
+            requestedId: null,
+            source: 'none',
+            digest: null,
+          },
+          promptTelemetryParts: {
+            skillPrompt: '',
+            designSystemPrompt: '',
+            pluginStagePrompt: '',
+          },
+          stableSectionInputs: {},
+          odNextStableContextPrompt: '',
+        }
+      : strategyTaskAtStart
       ? {
           prompt: '',
           activeSkillDirs: [],
@@ -12643,16 +12687,18 @@ export async function startServer({
         ? [odNextTaskInputSnapshot.projectionAccessRoot]
         : []),
     ];
-    const researchCommandContract = resolveResearchCommandContract(
-      research,
-      isOdNextInitialRun
-        ? resolveOdNextRequestUserPrompt({
-            message,
-            currentPrompt,
-            hasCurrentPrompt: hasExplicitCurrentPrompt,
-          })
-        : message,
-    );
+    const researchCommandContract = passthroughPrompts
+      ? ''
+      : resolveResearchCommandContract(
+          research,
+          isOdNextInitialRun
+            ? resolveOdNextRequestUserPrompt({
+                message,
+                currentPrompt,
+                hasCurrentPrompt: hasExplicitCurrentPrompt,
+              })
+            : message,
+        );
     // Resume-capable adapters continue their own upstream session so they
     // keep working memory across turns. Decide once per run; reuse for the
     // prompt-composition skipTranscript choice, the buildArgs flags, and the
@@ -12931,25 +12977,33 @@ export async function startServer({
             resumeContinuationSeed.anchorAssistantMessageId,
           )
         : null;
-    const userRequestPrompt = isOdNextInitialRun
-      ? resolveOdNextRequestUserPrompt({
-          message,
-          currentPrompt,
-          hasCurrentPrompt: hasExplicitCurrentPrompt,
-        })
-      : composeChatUserRequestForAgent(
-          message,
-          currentPrompt,
-          // Only trim to the latest turn when we are actually resuming an
-          // existing session. A create turn still sends the full transcript so
-          // a brand-new session (incl. first turn after another agent)
-          // is seeded with prior context.
-          {
-            skipTranscript: agentResumePromptPolicy.skipTranscript,
-            previousTurnTaskList,
-            resumeContinuationOriginalRequest,
-          },
-        );
+    const passthroughTurn = resolvePassthroughTurn({
+      message,
+      currentPrompt,
+      priorTranscript,
+      skipTranscript: agentResumePromptPolicy.skipTranscript,
+    });
+    const userRequestPrompt = passthroughPrompts
+      ? passthroughTurn.userInput
+      : isOdNextInitialRun
+        ? resolveOdNextRequestUserPrompt({
+            message,
+            currentPrompt,
+            hasCurrentPrompt: hasExplicitCurrentPrompt,
+          })
+        : composeChatUserRequestForAgent(
+            message,
+            currentPrompt,
+            // Only trim to the latest turn when we are actually resuming an
+            // existing session. A create turn still sends the full transcript so
+            // a brand-new session (incl. first turn after another agent)
+            // is seeded with prior context.
+            {
+              skipTranscript: agentResumePromptPolicy.skipTranscript,
+              previousTurnTaskList,
+              resumeContinuationOriginalRequest,
+            },
+          );
     // The stable instruction slice (daemon prompt + tool contract + system
     // prompt = design system / skills / memory) is identical across turns of
     // a conversation in the common case. A resumed Claude session already
@@ -12958,20 +13012,24 @@ export async function startServer({
     // turns and changed-hash turns send the full block (byte-identical to the
     // previous behavior); non-resume agents have isResuming === false and so
     // always send the full block.
-    const stableInstructionFingerprint = (strategyTaskAtStart
-      ? [daemonSystemPrompt, odNextStableContextPrompt, runtimeToolPrompt, systemPrompt]
-      : [daemonSystemPrompt, runtimeToolPrompt, systemPrompt])
-      .map((part) => (typeof part === 'string' ? part.trim() : ''))
-      .join('\n\n---\n\n');
+    const stableInstructionFingerprint = passthroughPrompts
+      ? ''
+      : (strategyTaskAtStart
+          ? [daemonSystemPrompt, odNextStableContextPrompt, runtimeToolPrompt, systemPrompt]
+          : [daemonSystemPrompt, runtimeToolPrompt, systemPrompt])
+        .map((part) => (typeof part === 'string' ? part.trim() : ''))
+        .join('\n\n---\n\n');
     const currentStableHash = hashStableInstructions(stableInstructionFingerprint);
     // Per-section digests of the SAME inputs the fingerprint is built from, so a
     // drift event can name which one moved. `currentStableHash` above stays the
     // sole re-send decider — these only label a decision already made.
-    const currentStableSections = computeStableSectionHashes({
-      ...(stableSectionInputs ?? {}),
-      runtimeToolPrompt,
-      clientSystemPrompt: systemPrompt,
-    });
+    const currentStableSections = passthroughPrompts
+      ? computeStableSectionHashes({})
+      : computeStableSectionHashes({
+          ...(stableSectionInputs ?? {}),
+          runtimeToolPrompt,
+          clientSystemPrompt: systemPrompt,
+        });
     // `runtimeToolPrompt` is part of the fingerprint and varies only when the
     // tool-token grant's presence flips between turns (rare cwd/projectId edge
     // cases); any such change correctly forces a full re-send that turn.
@@ -12988,8 +13046,11 @@ export async function startServer({
       currentStableSections,
     });
     const currentStableSectionsJson = serializeStableSections(currentStableSections);
-    const browserUsePromptGuard = renderBrowserUseUnavailablePrompt(run.browserUse ?? null);
+    const browserUsePromptGuard = passthroughPrompts
+      ? ''
+      : renderBrowserUseUnavailablePrompt(run.browserUse ?? null);
     const titleGenerationRequested =
+      !passthroughPrompts &&
       titleGeneration &&
       typeof titleGeneration === 'object' &&
       titleGeneration.enabled === true &&
@@ -13028,11 +13089,13 @@ export async function startServer({
      * marker contract was arriving with no locale attached and the follow-up
      * suggestions came back in English on a zh-CN run.
      */
-    const hostProtocol = renderChatTurnHostProtocolInstructions(
-      typeof run.doneKey === 'string' ? run.doneKey : '',
-      'ordinary',
-      typeof locale === 'string' ? locale : undefined,
-    );
+    const hostProtocol = passthroughPrompts
+      ? { doneMarker: '', nextSteps: '', artifactFocus: '', text: '' }
+      : renderChatTurnHostProtocolInstructions(
+          typeof run.doneKey === 'string' ? run.doneKey : '',
+          'ordinary',
+          typeof locale === 'string' ? locale : undefined,
+        );
     /*
      * This turn's follow-up suggestions.
      *
@@ -13069,7 +13132,9 @@ export async function startServer({
     // the per-turn slice keeps the upstream prompt-cache prefix byte-stable
     // across resumes (protecting the conversation-history cache) while still
     // giving the model the current MCP auth state on every turn.
-    const mcpConnectedDirective = renderConnectedExternalMcpDirective(connectedExternalMcp);
+    const mcpConnectedDirective = passthroughPrompts
+      ? ''
+      : renderConnectedExternalMcpDirective(connectedExternalMcp);
     /*
      * NOTE(sync/main): this branch used to hand-roll the client instruction
      * slice here (`clientInstructionParts` + `composeLiveInstructionPrompt`).
@@ -13104,14 +13169,18 @@ export async function startServer({
         : formIdForOverride !== null
           ? FORM_ANSWERED_GENERIC_OVERRIDE
           : '';
-    const agentFormOverride = isOdNextInitialRun && formIdForOverride
-      ? formIdForOverride === 'discovery' || formIdForOverride === 'task-type'
-        ? `The <user_first_prompt> contains submitted answers for the ${formIdForOverride} form. Apply them to the active OD Next plan. Do not re-emit that answered form or repeat fields it already answered.`
-        : `The <user_first_prompt> contains submitted answers for the ${formIdForOverride} form. Treat them as the active user turn and do not replay the answered form.`
-      : formOverride;
-    const agentEchoGuard = isOdNextInitialRun
-      ? OD_NEXT_BUNDLE_ECHO_GUARD_V2
-      : ECHO_GUARD;
+    const agentFormOverride = passthroughPrompts
+      ? ''
+      : isOdNextInitialRun && formIdForOverride
+        ? formIdForOverride === 'discovery' || formIdForOverride === 'task-type'
+          ? `The <user_first_prompt> contains submitted answers for the ${formIdForOverride} form. Apply them to the active OD Next plan. Do not re-emit that answered form or repeat fields it already answered.`
+          : `The <user_first_prompt> contains submitted answers for the ${formIdForOverride} form. Treat them as the active user turn and do not replay the answered form.`
+        : formOverride;
+    const agentEchoGuard = passthroughPrompts
+      ? ''
+      : isOdNextInitialRun
+        ? OD_NEXT_BUNDLE_ECHO_GUARD_V2
+        : ECHO_GUARD;
     const includeStableForPayload = isOdNextInitialRun || includeStableInstructions;
     const promptImagePaths = selectPromptImagePaths(
       def.id,
@@ -13146,48 +13215,77 @@ export async function startServer({
         persistedStrategyFinalText = finalText.text;
       }
     }
-    const composedResult = strategyTaskAtStart
-      ? {
-          composedPrompt: persistedStrategyFinalText!,
-          clientInstructionPrompt: '',
-          instructionPrompt: '',
-        }
-      : composeChatAgentTextPayload({
-      formOverride: agentFormOverride,
-      daemonSystemPrompt: includeStableForPayload ? daemonSystemPrompt : '',
-      runtimeToolPrompt: includeStableForPayload ? runtimeToolPrompt : '',
-      researchCommandContract,
-      runContextPrompt,
-      connectedExternalMcpReference: mcpConnectedDirective,
-      browserUnavailableGuard: browserUsePromptGuard,
-      titleGenerationDirective: titleGenerationPrompt,
-      // This branch's per-turn directives ride in ahead of the system prompt,
-      // exactly where they sat in the pre-merge `clientInstructionParts` array.
-      // Each is keyed on this run's nonce, so they are unconditional while
-      // `systemPrompt` stays gated on the stable-slice decision.
-      clientSystemPrompt: [
-        hostProtocol.doneMarker,
-        hostProtocol.nextSteps,
-        hostProtocol.artifactFocus,
-        includeStableForPayload ? systemPrompt : '',
-      ]
-        .map((part) => (typeof part === 'string' ? part.trim() : ''))
-        .filter(Boolean)
-        .join('\n\n---\n\n'),
-      cwdReference: cwdHint,
-      linkedDirectoryReferences: linkedDirsHint,
-      echoGuard: agentEchoGuard,
-      requestOrStageText: userRequestPrompt,
-      projectAttachmentReferences: attachmentHint,
-      commentAttachmentReferences: commentHint,
-      imageReferences: promptImagePaths.map((p) => `@${p}`).join(' '),
-      strategyInputStage: strategyTaskAtStart?.inputStage ?? null,
-        });
+    const passthroughSelectedFiles = [
+      ...safeAttachments,
+      ...passthroughWorkspaceItems
+        .filter((item) => item.kind === 'file' || item.kind === 'design-files')
+        .map((item) => item.path || item.absolutePath || '')
+        .filter(Boolean),
+    ];
+    const passthroughAnnotations = safeCommentAttachments.map((item) => {
+      const { intent: _intent, ...facts } = item;
+      return facts;
+    });
+    const composedResult = passthroughPrompts
+      ? composePassthroughPrompt({
+          userInput: passthroughTurn.userInput,
+          priorTranscript: passthroughTurn.priorTranscript,
+          workingDirectory: effectiveCwd,
+          selectedFiles: passthroughSelectedFiles,
+          linkedDirectories: linkedDirs,
+          workspaceItems: passthroughWorkspaceItems,
+          selectedAnnotations: passthroughAnnotations,
+          imageReferences: promptImagePaths,
+        })
+      : strategyTaskAtStart
+        ? {
+            composedPrompt: persistedStrategyFinalText!,
+            clientInstructionPrompt: '',
+            instructionPrompt: '',
+          }
+        : composeChatAgentTextPayload({
+            formOverride: agentFormOverride,
+            daemonSystemPrompt: includeStableForPayload ? daemonSystemPrompt : '',
+            runtimeToolPrompt: includeStableForPayload ? runtimeToolPrompt : '',
+            researchCommandContract,
+            runContextPrompt,
+            connectedExternalMcpReference: mcpConnectedDirective,
+            browserUnavailableGuard: browserUsePromptGuard,
+            titleGenerationDirective: titleGenerationPrompt,
+            // This branch's per-turn directives ride in ahead of the system prompt,
+            // exactly where they sat in the pre-merge `clientInstructionParts` array.
+            // Each is keyed on this run's nonce, so they are unconditional while
+            // `systemPrompt` stays gated on the stable-slice decision.
+            clientSystemPrompt: [
+              hostProtocol.doneMarker,
+              hostProtocol.nextSteps,
+              hostProtocol.artifactFocus,
+              includeStableForPayload ? systemPrompt : '',
+            ]
+              .map((part) => (typeof part === 'string' ? part.trim() : ''))
+              .filter(Boolean)
+              .join('\n\n---\n\n'),
+            cwdReference: cwdHint,
+            linkedDirectoryReferences: linkedDirsHint,
+            echoGuard: agentEchoGuard,
+            requestOrStageText: userRequestPrompt,
+            projectAttachmentReferences: attachmentHint,
+            commentAttachmentReferences: commentHint,
+            imageReferences: promptImagePaths.map((p) => `@${p}`).join(' '),
+            strategyInputStage: strategyTaskAtStart?.inputStage ?? null,
+          });
     const {
       composedPrompt: composed,
       clientInstructionPrompt,
     } = composedResult;
-    if (strategyTaskAtStart?.inputStage === 'request') {
+    if (process.env.OD_DEBUG_COMPOSED_PROMPT === '1') {
+      console.info('[prompt-debug]', {
+        runId: run.id,
+        promptMode,
+        composedPrompt: composed,
+      });
+    }
+    if (!passthroughPrompts && strategyTaskAtStart?.inputStage === 'request') {
       assertOdNextSemanticRequestFactProducerCoverage('request', {
         prior_transcript: typeof priorTranscript === 'string' ? priorTranscript : '',
         current_user_turn: currentPrompt,
@@ -13212,9 +13310,12 @@ export async function startServer({
         image_attachment_selection: promptImagePaths,
       });
     }
+    const usesStrategyPrompt = !passthroughPrompts && Boolean(strategyRunMapping);
     const promptTelemetry = buildPromptStackTelemetry({
       composedPrompt: composed,
-      sections: strategyRunMapping
+      sections: passthroughPrompts
+        ? [{ kind: 'passthroughPrompt', content: composed }]
+        : strategyRunMapping
         ? [{ kind: 'odNextExactFinalText', content: composed }]
         : [
             { kind: 'formOverride', content: agentFormOverride },
@@ -13262,7 +13363,7 @@ export async function startServer({
           ],
     });
     try {
-      run.promptTelemetry = strategyRunMapping
+      run.promptTelemetry = usesStrategyPrompt
         ? bindOdNextExactSendPromptEvidence({
             telemetry: promptTelemetry,
             finalText: composed,

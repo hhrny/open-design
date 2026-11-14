@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  constrainOdNextPolicyForPromptMode,
   evaluateOdNextRollout,
   odNextTaskTypeForProjectScenarioBinding,
   readOdNextRolloutControlStatus,
@@ -18,6 +19,26 @@ function syntheticPolicy() {
 }
 
 describe('OD Next controlled rollout', () => {
+  it('cannot be re-enabled while prompt passthrough is active', () => {
+    const constrained = constrainOdNextPolicyForPromptMode(
+      readOdNextRolloutPolicy({ OD_NEXT_STRATEGY_ROLLOUT: 'active' }),
+      'passthrough',
+    );
+    expect(constrained).toMatchObject({
+      requestedMode: 'off',
+      contentEnabled: false,
+      behaviorEnabled: false,
+    });
+    expect(evaluateOdNextRollout({
+      policy: constrained,
+      assignmentIdentity: 'project:conversation',
+      taskType: 'prototype',
+      agentId: 'codex',
+      agentVersion: 'test',
+      sourceKind: 'bundled',
+    })).toMatchObject({ effectiveMode: 'off', eligible: false });
+  });
+
   it('owns the legacy profiles and discovery by default, and honours a mode that was named', () => {
     const policy = readOdNextRolloutPolicy({ OD_NEXT_STRATEGY_ROLLOUT: 'active' });
     expect(policy).toMatchObject({
