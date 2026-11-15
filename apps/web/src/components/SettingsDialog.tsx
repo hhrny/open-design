@@ -862,6 +862,7 @@ const AGENT_SHORT_DESCRIPTIONS: Record<string, string> = {
   codex: 'OpenAI official CLI',
   'cursor-agent': 'Cursor command line',
   opencode: 'Open-source agent CLI',
+  'opencode-server': 'OpenDesign-managed OpenCode v2 server',
   qwen: 'Qwen coding CLI',
   copilot: 'GitHub coding CLI',
   devin: 'Cognition terminal CLI',
@@ -946,6 +947,25 @@ const AGENT_CLI_ENV_FIELDS = [
     labelSuffix: 'OPENAI_API_KEY',
     placeholder: 'Paste OPENAI_API_KEY',
     secret: true,
+  },
+  {
+    agentId: 'opencode-server',
+    envKey: 'OPEN_DESIGN_OPENCODE_SERVER_URL',
+    label: 'OpenCode server URL (loopback HTTP is managed)',
+    placeholder: 'http://127.0.0.1:4096',
+  },
+  {
+    agentId: 'opencode-server',
+    envKey: 'OPENCODE_PASSWORD',
+    label: 'OpenCode server password',
+    placeholder: 'Optional for managed local server',
+    secret: true,
+  },
+  {
+    agentId: 'opencode-server',
+    envKey: 'OPENCODE_BIN',
+    label: 'OpenCode client executable path',
+    placeholder: '/absolute/path/to/opencode',
   },
 ] as const;
 
@@ -5463,7 +5483,7 @@ export function SettingsDialog({
                             key={`${field.agentId}:${field.envKey}`}
                           >
                             <span className="field-label">
-                              {t(field.labelKey)}
+                              {'label' in field ? field.label : t(field.labelKey)}
                               {'labelSuffix' in field
                                 ? ` (${field.labelSuffix})`
                                 : ''}

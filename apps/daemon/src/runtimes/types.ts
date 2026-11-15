@@ -30,6 +30,8 @@ export type RuntimeBuildOptions = {
 
 export type RuntimeContext = {
   cwd?: string;
+  /** Per-agent Settings overrides used by adapters that build transport args. */
+  configuredEnv?: Record<string, string>;
   // True when the current chat run has at least one prior persisted
   // assistant message in the same conversation — i.e. this isn't the
   // first user turn. Plain-streaming adapters that support a "continue

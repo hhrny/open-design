@@ -8,6 +8,7 @@ const AGENT_LABELS: Record<string, string> = {
   kimi: 'Kimi CLI',
   kiro: 'Kiro',
   opencode: 'OpenCode',
+  'opencode-server': 'OpenCode Server',
   amr: 'OpenDesign',
   'cursor-agent': 'Cursor',
   cursor: 'Cursor',

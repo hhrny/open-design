@@ -111,6 +111,7 @@ function chatProtocolFromAgent(
   if (
     id === 'codex'
     || id === 'opencode'
+    || id === 'opencode-server'
     || id === 'qwen'
     || id === 'deepseek'
     || id === 'kimi'
@@ -143,6 +144,7 @@ function cliAgentLabel(agentId: string | null | undefined): string | null {
     codex: 'Codex CLI',
     gemini: 'Gemini CLI',
     opencode: 'OpenCode',
+    'opencode-server': 'OpenCode Server',
     qwen: 'Qwen Code',
     qoder: 'Qoder CLI',
     copilot: 'GitHub Copilot CLI',

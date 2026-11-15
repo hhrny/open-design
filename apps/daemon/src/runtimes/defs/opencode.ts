@@ -17,7 +17,7 @@ function reasoningOptions(ids: readonly string[]): RuntimeModelOption[] {
   ];
 }
 
-const OPENCODE_FALLBACK_MODELS: RuntimeModelOption[] = [
+export const OPENCODE_FALLBACK_MODELS: RuntimeModelOption[] = [
   DEFAULT_MODEL_OPTION,
   {
     id: 'anthropic/claude-sonnet-4-5',

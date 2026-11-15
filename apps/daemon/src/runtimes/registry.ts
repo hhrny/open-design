@@ -3,6 +3,7 @@ import { claudeAgentDef } from './defs/claude.js';
 import { codexAgentDef } from './defs/codex.js';
 import { devinAgentDef } from './defs/devin.js';
 import { opencodeAgentDef } from './defs/opencode.js';
+import { opencodeServerAgentDef } from './defs/opencode-server.js';
 import { byokOpenCodeAgentDef } from './defs/byok-opencode.js';
 import { hermesAgentDef } from './defs/hermes.js';
 import { traeCliAgentDef } from './defs/trae-cli.js';
@@ -43,6 +44,7 @@ export const SHIPPED_AGENT_DEFS: RuntimeAgentDef[] = [
   codexAgentDef,
   devinAgentDef,
   opencodeAgentDef,
+  opencodeServerAgentDef,
   byokOpenCodeAgentDef,
   hermesAgentDef,
   traeCliAgentDef,

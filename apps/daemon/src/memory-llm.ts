@@ -77,6 +77,7 @@ import {
 } from './agents.js';
 import { agentCliEnvForAgent, readAppConfig } from './app-config.js';
 import { createJsonEventStreamHandler } from './runtimes/json-event-stream.js';
+import { ensureManagedOpenCodeServer } from './runtimes/opencode-server-manager.js';
 
 const SYSTEM_PROMPT = `You are a memory extractor for a personal AI design assistant.
 
@@ -289,6 +290,7 @@ function chatProtocolFromAgentId(agentId) {
   if (
     id === 'codex'
     || id === 'opencode'
+    || id === 'opencode-server'
     || id === 'qwen'
     || id === 'deepseek'
     || id === 'kimi'
@@ -312,7 +314,10 @@ function canUseLocalCliForMemory(agentId, provider) {
   // mode that accepts stdin and a parser we can reduce back to assistant text.
   if (agentId === 'claude' && provider === 'anthropic') return true;
   if (agentId === 'codex' && provider === 'openai') return true;
-  if (agentId === 'opencode' && provider === 'openai') return true;
+  if (
+    (agentId === 'opencode' || agentId === 'opencode-server')
+    && provider === 'openai'
+  ) return true;
   return false;
 }
 
@@ -978,6 +983,12 @@ async function callLocalCli(provider, system, user, options) {
   if (!launch?.launchPath) {
     throw new Error(`${def.name} CLI is not installed or not on PATH`);
   }
+  if (provider.agentId === 'opencode-server' && launch.selectedPath) {
+    configuredAgentEnv = await ensureManagedOpenCodeServer(
+      launch.selectedPath,
+      configuredAgentEnv,
+    );
+  }
 
   // The memory extractor is a tool-less, JSON-only background call that never
   // reads project files, so it has no reason to run in the daemon's own cwd.
@@ -1013,7 +1024,10 @@ async function callLocalCli(provider, system, user, options) {
       { cwd },
     );
     parseStdout = (raw) => extractJsonEventText(def.eventParser || def.id, raw, def.name);
-  } else if (provider.agentId === 'opencode') {
+  } else if (
+    provider.agentId === 'opencode'
+    || provider.agentId === 'opencode-server'
+  ) {
     // Deliver the prompt on stdin, matching the chat-run path
     // (def.promptViaStdin). `opencode run`'s `-f, --file` is a yargs array
     // option that greedily consumes every trailing non-flag token, so
@@ -1025,7 +1039,7 @@ async function callLocalCli(provider, system, user, options) {
       [],
       [],
       { model: provider.model },
-      { cwd },
+      { cwd, configuredEnv: configuredAgentEnv },
     );
     parseStdout = (raw) => extractJsonEventText(def.eventParser || def.id, raw, def.name);
   } else {

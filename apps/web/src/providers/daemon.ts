@@ -953,7 +953,11 @@ function formatLegacyOpenCodeSessionError(text: string): string | null {
 }
 
 function isAmrOpenCodeExitFallback(agentId: string | undefined, stderr: string): boolean {
-  if (agentId === 'amr' || agentId === 'opencode') return true;
+  if (
+    agentId === 'amr'
+    || agentId === 'opencode'
+    || agentId === 'opencode-server'
+  ) return true;
   const normalized = stderr.toLowerCase();
   return normalized.includes('opencode server listening') || normalized.includes('opencode session error:');
 }

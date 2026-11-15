@@ -64,6 +64,7 @@ import { aihubmixHeaders } from './integrations/aihubmix.js';
 import type { AgentCliEnvPrefs } from './app-config.js';
 import type { RuntimeAgentDef } from './runtimes/types.js';
 import { preparePromptFileForAgent, type PreparedPromptFile } from './runtimes/prompt-file.js';
+import { ensureManagedOpenCodeServer } from './runtimes/opencode-server-manager.js';
 import { configuredAllowedInternalHosts } from './origin-validation.js';
 import {
   isAllowlistedInternalHost,
@@ -2342,7 +2343,7 @@ async function testAgentConnectionInternal(
       diagnostics: { phase: 'binary_resolution' },
     };
   }
-  const configuredAgentEnv = agentCliEnvForAgent(
+  let configuredAgentEnv = agentCliEnvForAgent(
     validateAgentCliEnv(input.agentCliEnv),
     input.agentId,
   );
@@ -2357,6 +2358,24 @@ async function testAgentConnectionInternal(
       agentName: def.name,
       diagnostics: { phase: 'binary_resolution' },
     };
+  }
+  if (input.agentId === 'opencode-server') {
+    try {
+      configuredAgentEnv = await ensureManagedOpenCodeServer(
+        resolvedBin,
+        configuredAgentEnv,
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        kind: 'agent_spawn_failed',
+        latencyMs: Date.now() - start,
+        model,
+        agentName: def.name,
+        detail: redactSecrets(error instanceof Error ? error.message : String(error)),
+        diagnostics: { phase: 'binary_resolution' },
+      };
+    }
   }
 
   const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-conn-test-'));
@@ -2393,7 +2412,7 @@ async function testAgentConnectionInternal(
     sink.send(event, payload);
     if (
       providerConnectivitySettled ||
-      input.agentId !== 'opencode' ||
+      (input.agentId !== 'opencode' && input.agentId !== 'opencode-server') ||
       event !== 'stderr'
     ) {
       return;
@@ -2556,7 +2575,10 @@ async function testAgentConnectionInternal(
   const resultFromCancellation = (
     kind: 'timeout' | 'aborted',
   ): ConnectionTestResponse => {
-    if (kind === 'timeout' && input.agentId === 'opencode') {
+    if (
+      kind === 'timeout'
+      && (input.agentId === 'opencode' || input.agentId === 'opencode-server')
+    ) {
       const rawDetail = `${sink.getStderrTail()}\n${sink.getRawStdoutTail()}`;
       const providerDetail = openCodeProviderConnectivityDetail(rawDetail);
       if (providerDetail) {
@@ -2600,6 +2622,7 @@ async function testAgentConnectionInternal(
         },
         {
           cwd: tempDir,
+          configuredEnv: configuredAgentEnv,
           ...(promptFile ? { promptFilePath: promptFile.path } : {}),
           ...(antigravityLogFilePath
             ? { agentLogFilePath: antigravityLogFilePath }
@@ -2767,7 +2790,7 @@ async function testAgentConnectionInternal(
       // close event before all stdout chunks have reached the parser.
       await delay(AGENT_STDOUT_DRAIN_MS);
       const latencyMs = Date.now() - start;
-      if (input.agentId === 'opencode') {
+      if (input.agentId === 'opencode' || input.agentId === 'opencode-server') {
         const providerDetail = openCodeProviderConnectivityDetail(
           `${sink.getStderrTail()}\n${sink.getRawStdoutTail()}`,
         );
@@ -2929,7 +2952,7 @@ async function testAgentConnectionInternal(
       ]
         .filter(Boolean)
         .join(' · ');
-      if (input.agentId === 'opencode') {
+      if (input.agentId === 'opencode' || input.agentId === 'opencode-server') {
         const outdatedCliDetail = openCodeOutdatedCliDetail(rawDetail);
         if (outdatedCliDetail) {
           console.warn(

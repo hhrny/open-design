@@ -47,6 +47,10 @@ import { startServer } from '../src/server.js';
 import { getRememberedLiveModels, rememberLiveModels } from '../src/runtimes/models.js';
 import { amrModelLoadingCache } from '../src/runtimes/amr-model-cache.js';
 import { buildAmrModelCacheKey } from '../src/runtimes/amr-model-probe.js';
+import {
+  managedOpenCodeServerStatus,
+  stopManagedOpenCodeServer,
+} from '../src/runtimes/opencode-server-manager.js';
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -3966,6 +3970,140 @@ process.stdin.on('end', () => {
       );
     } finally {
       await fsp.rm(markerDir, { recursive: true, force: true });
+    }
+  });
+
+  it('launches OpenCode Server with its configured URL, password, and v2 args', async () => {
+    const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-opencode-server-'));
+    const invocationFile = path.join(markerDir, 'invocation.json');
+    try {
+      await withFakeOpenCode(
+        `
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+let stdin = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { stdin += chunk; });
+process.stdin.on('end', () => {
+  fs.writeFileSync(${JSON.stringify(invocationFile)}, JSON.stringify({
+    args,
+    stdin,
+    password: process.env.OPENCODE_PASSWORD,
+  }));
+  console.log(JSON.stringify({ type: 'text', part: { text: 'ok' } }));
+});
+`,
+        async () => {
+          const res = await realFetch(`${baseUrl}/api/test/connection`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              mode: 'agent',
+              agentId: 'opencode-server',
+              model: 'openai/gpt-5',
+              reasoning: 'high',
+              agentCliEnv: {
+                'opencode-server': {
+                  OPEN_DESIGN_OPENCODE_SERVER_URL: 'https://agent.example.test/',
+                  OPENCODE_PASSWORD: 'server-secret',
+                },
+              },
+            }),
+          });
+
+          expect(res.status).toBe(200);
+          await expect(res.json()).resolves.toMatchObject({
+            ok: true,
+            kind: 'success',
+            agentName: 'OpenCode Server',
+            model: 'openai/gpt-5',
+            sample: 'ok',
+          });
+          await expect(
+            fsp.readFile(invocationFile, 'utf8').then((raw) => JSON.parse(raw) as unknown),
+          ).resolves.toEqual({
+            args: [
+              'run',
+              '--server',
+              'https://agent.example.test',
+              '--format',
+              'json',
+              '--auto',
+              '-m',
+              'openai/gpt-5',
+            ],
+            stdin: 'Reply with only: ok',
+            password: 'server-secret',
+          });
+        },
+      );
+    } finally {
+      await fsp.rm(markerDir, { recursive: true, force: true });
+    }
+  });
+
+  it('starts and uses a managed local OpenCode Server during connection testing', async () => {
+    const portAllocator = http.createServer();
+    await new Promise<void>((resolve) => portAllocator.listen(0, '127.0.0.1', resolve));
+    const address = portAllocator.address();
+    const port = address && typeof address === 'object' ? address.port : 0;
+    await new Promise<void>((resolve, reject) =>
+      portAllocator.close((error) => (error ? reject(error) : resolve())),
+    );
+
+    try {
+      await withFakeOpenCode(
+        `
+const http = require('node:http');
+const args = process.argv.slice(2);
+if (args[0] === 'serve') {
+  const host = args[args.indexOf('--hostname') + 1];
+  const port = Number(args[args.indexOf('--port') + 1]);
+  const expected = 'Basic ' + Buffer.from('opencode:' + process.env.OPENCODE_SERVER_PASSWORD).toString('base64');
+  const server = http.createServer((request, response) => {
+    if (request.headers.authorization !== expected) {
+      response.writeHead(401).end();
+      return;
+    }
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ version: 'test' }));
+  });
+  server.listen(port, host);
+  process.on('SIGTERM', () => server.close(() => process.exit(0)));
+} else if (args[0] === 'run') {
+  process.stdin.resume();
+  process.stdin.on('end', () => {
+    console.log(JSON.stringify({ type: 'text', part: { text: 'ok' } }));
+  });
+} else {
+  process.exit(2);
+}
+`,
+        async () => {
+          const result = await testAgentConnection({
+            agentId: 'opencode-server',
+            agentCliEnv: {
+              'opencode-server': {
+                OPEN_DESIGN_OPENCODE_SERVER_URL: `http://127.0.0.1:${port}`,
+                OPENCODE_PASSWORD: 'managed-secret',
+              },
+            },
+          });
+
+          expect(result).toMatchObject({
+            ok: true,
+            kind: 'success',
+            agentName: 'OpenCode Server',
+            sample: 'ok',
+          });
+          expect(managedOpenCodeServerStatus()).toMatchObject({
+            owned: true,
+            url: `http://127.0.0.1:${port}`,
+          });
+        },
+      );
+    } finally {
+      await stopManagedOpenCodeServer();
     }
   });
 

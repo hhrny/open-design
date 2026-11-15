@@ -527,6 +527,12 @@ describe('app-config', () => {
             TEMP: '  /custom/temp  ',
             HOME: 'should-not-persist',
           },
+          'opencode-server': {
+            OPENCODE_BIN: '  ~/bin/opencode-v2  ',
+            OPEN_DESIGN_OPENCODE_SERVER_URL: '  https://agent.example.test  ',
+            OPENCODE_PASSWORD: '  server-secret  ',
+            OPENCODE_SERVER_PASSWORD: 'should-not-persist',
+          },
           'byok-opencode': {
             OPENCODE_BIN: '  ~/bin/byok-opencode  ',
           },
@@ -556,6 +562,11 @@ describe('app-config', () => {
           OPENCODE_TEST_HOME: '~/.open-design-amr-opencode',
         },
         opencode: { OPENCODE_BIN: '~/bin/opencode', TMPDIR: '/custom/tmpdir', TMP: '/custom/tmp', TEMP: '/custom/temp' },
+        'opencode-server': {
+          OPENCODE_BIN: '~/bin/opencode-v2',
+          OPEN_DESIGN_OPENCODE_SERVER_URL: 'https://agent.example.test',
+          OPENCODE_PASSWORD: 'server-secret',
+        },
         'trae-cli': { TRAE_CLI_BIN: '~/bin/traecli-public' },
         // pi's config-directory override survives the save (#8093); the
         // neighbouring session-dir key is not in the contract and still does not.

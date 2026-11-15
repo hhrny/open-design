@@ -734,6 +734,9 @@ describe('isAgentResumeFailure dispatch', () => {
     expect(
       isAgentResumeFailure('opencode', 'no rollout found for thread id abc'),
     ).toBe(false);
+    expect(
+      isAgentResumeFailure('opencode-server', 'Error: Session not found', ''),
+    ).toBe(true);
   });
 
   it('does NOT treat a generic phrase in successful assistant stdout as a resume miss (#4629 nettee)', () => {

@@ -268,6 +268,10 @@ import { withAcpHandshakeFailureGuidance } from './runtimes/acp-handshake-failur
 import { withAcpServiceFailureCode } from './runtimes/acp-service-failure.js';
 import { preflightCodexDefaultModel } from './runtimes/codex-model-preflight.js';
 import { preparePromptFileForAgent } from './runtimes/prompt-file.js';
+import {
+  ensureManagedOpenCodeServer,
+  stopManagedOpenCodeServer,
+} from './runtimes/opencode-server-manager.js';
 import { TerminalControlSequenceStripper } from './runtimes/terminal-control.js';
 import { stampToolTiming } from './runtimes/tool-timing.js';
 import {
@@ -12728,6 +12732,15 @@ export async function startServer({
     } catch {
       configuredAgentEnv = {};
     }
+    if (def.id === 'opencode-server') {
+      const serverLaunch = resolveAgentLaunch(def, configuredAgentEnv);
+      if (serverLaunch.selectedPath && serverLaunch.launchPath) {
+        configuredAgentEnv = await ensureManagedOpenCodeServer(
+          serverLaunch.selectedPath,
+          configuredAgentEnv,
+        );
+      }
+    }
     const requestedAmrModelActor = def.id === 'amr'
       ? authenticatedRunActor(process.env, configuredAgentEnv)
       : null;
@@ -14667,6 +14680,7 @@ export async function startServer({
         agentOptions,
         {
           cwd: effectiveCwd,
+          configuredEnv: configuredAgentEnv,
           hasPriorAssistantTurn,
           agentLogFilePath,
           promptFilePath: promptFile?.path,
@@ -18918,6 +18932,7 @@ export async function startServer({
         clearTerminalTelemetryFallbackTimers();
         const shutdownGraceMs = resolveChatRunShutdownGraceMs();
         await design.runs.shutdownActive({ graceMs: shutdownGraceMs });
+        await stopManagedOpenCodeServer();
         // Cleanup runs independently of user terminal classification. Give
         // confirmed closed writers at most three additional seconds at shutdown.
         const cleanupDrain = await codexThreadCleanupOwner.drain(shutdownGraceMs);

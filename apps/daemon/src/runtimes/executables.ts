@@ -30,6 +30,7 @@ const AGENT_BIN_ENV_KEYS = new Map<string, string>([
   ['kilo', 'KILO_BIN'],
   ['mimo', 'MIMO_BIN'],
   ['opencode', 'OPENCODE_BIN'],
+  ['opencode-server', 'OPENCODE_BIN'],
   ['byok-opencode', 'OPENCODE_BIN'],
   ['pi', 'PI_BIN'],
   ['qoder', 'QODER_BIN'],

@@ -226,6 +226,11 @@ const AGENT_CLI_ENV_KEYS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['kiro', new Set(['KIRO_BIN'])],
   ['kilo', new Set(['KILO_BIN'])],
   ['opencode', new Set(['OPENCODE_BIN', 'TMPDIR', 'TMP', 'TEMP'])],
+  ['opencode-server', new Set([
+    'OPENCODE_BIN',
+    'OPEN_DESIGN_OPENCODE_SERVER_URL',
+    'OPENCODE_PASSWORD',
+  ])],
   // PI_CODING_AGENT_DIR is pi's own config-directory override (default
   // `~/.pi/agent`), the same contract CLAUDE_CONFIG_DIR and CODEX_HOME carry
   // for their CLIs. Without it here, a user isolating pi's config had the key
@@ -249,6 +254,10 @@ const AGENT_CLI_AUTH_ENV_KEYS: ReadonlyMap<string, {
   ['codex', {
     auth: new Set(['CODEX_API_KEY', 'OPENAI_API_KEY']),
     baseUrl: new Set(['OPENAI_BASE_URL']),
+  }],
+  ['opencode-server', {
+    auth: new Set(['OPENCODE_PASSWORD']),
+    baseUrl: new Set(['OPEN_DESIGN_OPENCODE_SERVER_URL']),
   }],
 ]);
 

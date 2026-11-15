@@ -210,6 +210,7 @@ export type TrackingCliProviderId =
   | 'devin_for_terminal'
   | 'gemini_cli'
   | 'opencode'
+  | 'opencode_server'
   | 'byok_opencode'
   | 'hermes'
   | 'kimi_cli'

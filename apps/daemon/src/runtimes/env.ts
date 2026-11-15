@@ -188,7 +188,11 @@ export function spawnEnvForAgent(
     }
     return finalizeRuntimeEnv(env, sandboxRuntime);
   }
-  if (agentId === 'opencode' || agentId === 'byok-opencode') {
+  if (
+    agentId === 'opencode'
+    || agentId === 'opencode-server'
+    || agentId === 'byok-opencode'
+  ) {
     stripKeysCaseInsensitive(env, [
       'OPENCODE',
       'OPENCODE_PID',

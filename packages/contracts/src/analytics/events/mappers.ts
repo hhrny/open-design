@@ -212,6 +212,8 @@ export function agentIdToTracking(agentId: string | null | undefined): TrackingC
       return 'gemini_cli';
     case 'opencode':
       return 'opencode';
+    case 'opencode-server':
+      return 'opencode_server';
     case 'hermes':
       return 'hermes';
     case 'kimi':
@@ -610,4 +612,3 @@ export function harnessAnalyticsFromRolloutDecision(
       : {}),
   };
 }
-

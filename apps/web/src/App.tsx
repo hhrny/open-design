@@ -638,6 +638,7 @@ const CANONICAL_AGENT_ORDER = [
   'devin',
   'gemini',
   'opencode',
+  'opencode-server',
   'hermes',
   'trae-cli',
   'grok-build',
