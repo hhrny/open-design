@@ -177,8 +177,7 @@ describe('EntryNavRail local (signed-out) shell', () => {
     expect(screen.queryByTestId('entry-nav-local-account')).toBeNull();
     expect(screen.queryByTestId('entry-nav-message-center')).toBeNull();
     expect(screen.getByTestId('local-sign-in-card')).toBeTruthy();
-    // Existing community links are outside this local-row correction.
-    expect(screen.getByTestId('entry-nav-rail-social')).toBeTruthy();
+    expect(screen.queryByTestId('entry-nav-rail-social')).toBeNull();
     // Settings remains a single navigation destination after removing the
     // duplicate local identity trigger.
     fireEvent.click(screen.getByTestId('entry-settings-button'));

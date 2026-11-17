@@ -137,7 +137,6 @@ export const STAGE_ATTACHMENT_EVENT = 'opendesign:stage-attachment';
 export interface StageAttachmentEventDetail {
   attachments: ChatAttachment[];
 }
-import { DesignSystemSwitchPicker } from "./DesignSystemSwitchPicker";
 import { listenForConnectorsChanged } from './connectors-events';
 import { fetchConnectorCatalogSnapshot } from './connectors-state';
 import { PlaceholderCarousel } from './home-hero/PlaceholderCarousel';
@@ -6390,35 +6389,10 @@ function pluginSourceLabel(plugin: InstalledPluginRecord, t: TranslateFn): strin
 function ToolsImportPanel({
   t,
   onLinkFolder,
-  currentDesignSystemId,
-  onSwitchDesignSystem,
 }: {
   t: TranslateFn;
   onLinkFolder: () => Promise<void> | void;
-  currentDesignSystemId?: string | null;
-  // When omitted (no active project) the design-system import row stays
-  // disabled with the existing "Coming soon" affordance so users aren't
-  // routed into a picker that has nothing to PATCH. Returns true on a
-  // successful PATCH so the picker can close itself; false leaves the
-  // picker open so the user can retry.
-  onSwitchDesignSystem?: (
-    designSystemId: string | null,
-    title: string | null,
-  ) => Promise<boolean>;
 }) {
-  const [view, setView] = useState<'root' | 'designSystems'>('root');
-
-  if (view === 'designSystems' && onSwitchDesignSystem) {
-    return (
-      <DesignSystemSwitchPicker
-        t={t}
-        currentDesignSystemId={currentDesignSystemId}
-        onSelect={onSwitchDesignSystem}
-        onBack={() => setView('root')}
-      />
-    );
-  }
-
   return (
     <div className="composer-tools-list">
       <ImportItem icon="upload" label={t('chat.importFig')} t={t} />
@@ -6429,14 +6403,6 @@ function ToolsImportPanel({
         t={t}
         enabled
         onClick={() => void onLinkFolder()}
-      />
-      <ImportItem
-        icon="sparkles"
-        label={t('chat.importSkills')}
-        t={t}
-        enabled={!!onSwitchDesignSystem}
-        onClick={() => setView('designSystems')}
-        testId="composer-import-design-systems"
       />
       <ImportItem icon="file" label={t('chat.importProject')} t={t} />
     </div>

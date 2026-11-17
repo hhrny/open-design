@@ -64,7 +64,6 @@ const BUNDLED_RESOURCE_TREES = [
   // resolves it via DESIGN_TEMPLATES_DIR. Bundle it like any other
   // first-class resource so packaged builds carry the full template set.
   { from: "design-templates", to: "design-templates" },
-  { from: "design-systems", to: "design-systems" },
   { from: "craft", to: "craft" },
   { from: join("plugins", "_official"), to: join("plugins", "_official") },
   { from: join("plugins", "registry"), to: join("plugins", "registry") },

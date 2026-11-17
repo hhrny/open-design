@@ -54,8 +54,13 @@ describe('router entry sub-views', () => {
     expect(parseRoute('/projects/')).toEqual({ kind: 'home', view: 'projects' });
   });
 
-  it('parses /design-systems as the design-systems entry view', () => {
-    expect(parseRoute('/design-systems')).toEqual({ kind: 'home', view: 'design-systems' });
+  it('retires design-system and brand deep links to home', () => {
+    expect(parseRoute('/design-systems')).toEqual({ kind: 'home', view: 'home' });
+    expect(parseRoute('/design-systems/create')).toEqual({ kind: 'home', view: 'home' });
+    expect(parseRoute('/design-systems/example')).toEqual({ kind: 'home', view: 'home' });
+    expect(parseRoute('/brands/example')).toEqual({ kind: 'home', view: 'home' });
+    expect(buildPath({ kind: 'home', view: 'design-systems' })).toBe('/');
+    expect(buildPath({ kind: 'design-system-create' })).toBe('/');
   });
 
   it('parses /automations as the automations entry view', () => {
@@ -83,19 +88,17 @@ describe('router entry sub-views', () => {
   it('round-trips entry sub-views through buildPath', () => {
     for (const route of [
       { kind: 'home', view: 'home' } as Route,
-      { kind: 'home', view: 'onboarding' } as Route,
       { kind: 'home', view: 'projects' } as Route,
       { kind: 'home', view: 'tasks' } as Route,
       { kind: 'home', view: 'plugins' } as Route,
-      { kind: 'home', view: 'design-systems' } as Route,
       { kind: 'home', view: 'integrations' } as Route,
     ]) {
       expect(parseRoute(buildPath(route))).toEqual(route);
     }
   });
 
-  it('parses /onboarding as the global onboarding panel', () => {
-    expect(parseRoute('/onboarding')).toEqual({ kind: 'home', view: 'onboarding' });
-    expect(buildPath({ kind: 'home', view: 'onboarding' })).toBe('/onboarding');
+  it('retires the account onboarding route to home', () => {
+    expect(parseRoute('/onboarding')).toEqual({ kind: 'home', view: 'home' });
+    expect(buildPath({ kind: 'home', view: 'onboarding' })).toBe('/');
   });
 });

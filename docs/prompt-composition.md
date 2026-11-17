@@ -2,6 +2,15 @@
 
 Read this before changing any prompt text, wherever it lives.
 
+## Design Systems removal boundary
+
+Design Systems is no longer an active prompt input. The daemon always composes
+runs with no design-system selection, exposes no design-system registry to
+plugin application, and grants no design-system resource directory to agent
+runtimes. Passthrough, strategy, and legacy composition must all preserve this
+boundary. Compatibility DTO fields may remain while old projects are readable,
+but they must never add prompt text, files, or tool access to a run.
+
 ## The one thing to know first
 
 A generation run is composed by ONE of two independent implementations, and

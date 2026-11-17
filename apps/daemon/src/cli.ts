@@ -8,7 +8,6 @@ import { runArtifactsCli } from './artifacts-cli.js';
 import { runResource } from './resource-cli.js';
 import { runProjectHandoff } from './handoff-cli.js';
 import { runConnectorsToolCli } from './tools-connectors-cli.js';
-import { runDesignSystemsToolCli } from './tools-design-systems-cli.js';
 import { DESIGN_SYSTEMS_USAGE, isDesignSystemsHelpArg } from './cli-help/index.js';
 import { BRAND_USAGE, isBrandHelpArg } from './cli-help/index.js';
 import { parseDesignSystemRenameArgs } from './design-systems/rename-args.js';
@@ -240,8 +239,6 @@ const DIAGNOSTICS_STRING_FLAGS = new Set(['daemon-url', 'output']);
 const DIAGNOSTICS_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
 const CONFIG_STRING_FLAGS = new Set(['daemon-url', 'value', 'value-json']);
 const CONFIG_BOOLEAN_FLAGS = new Set(['help', 'h', 'json']);
-const AMR_STRING_FLAGS = new Set(['daemon-url', 'target']);
-const AMR_BOOLEAN_FLAGS = new Set(['help', 'h', 'json', 'refresh']);
 const COLLAB_STRING_FLAGS = new Set([
   'daemon-url', 'project', 'member', 'name', 'role', 'client-id', 'sequence', 'design-system',
   'workspace', 'workspace-member', 'version',
@@ -412,7 +409,6 @@ const SUBCOMMAND_MAP = {
   artifacts: runArtifacts,
   media: runMedia,
   mcp: runMcp,
-  amr: runAmr,
   collab: runCollab,
   'message-center': runMessageCenter,
   research: runResearch,
@@ -439,7 +435,6 @@ const SUBCOMMAND_MAP = {
   atoms: runAtoms,
   skill: runSkills,
   skills: runSkills,
-  'design-systems': runDesignSystems,
   resource: runResource,
   craft: runCraft,
   diagnostics: runDiagnostics,
@@ -1093,16 +1088,6 @@ if (argv[0] === 'tools' && argv[1] === 'live-artifacts') {
   // carries only an id+label index and the agent fetches the chosen
   // direction's full spec (palette, font stacks, posture) here.
   runDirectionsToolCli(argv.slice(2));
-} else if (argv[0] === 'tools' && argv[1] === 'design-systems') {
-  runDesignSystemsToolCli(argv.slice(2))
-    .then(({ exitCode }) => {
-      process.exitCode = exitCode;
-    })
-    .catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`${JSON.stringify({ ok: false, error: { message } })}\n`);
-      process.exitCode = 1;
-    });
 } else {
   await runDaemonCliStartup(argv, { printHelp: printRootHelp });
 }
@@ -1192,9 +1177,6 @@ function printRootHelp() {
   od tools connectors <list|execute|github-design-context> [options]
       Discover and execute configured connectors.
 
-  od tools design-systems read --path <manifest-declared-path>
-      Read active design-system pull-layer files through daemon wrapper commands.
-
   od mcp live-artifacts
       Start the MCP server exposing live-artifact and connector tools.
 
@@ -1217,10 +1199,6 @@ function printRootHelp() {
   od message-center <list|read|read-all> [args]
       Read and acknowledge message-center inbox items through the same
       daemon endpoints the bell UI uses.
-
-  od amr <login|status> [args]
-      Start Vela browser sign-in or inspect the current Vela account through
-      the local OpenDesign daemon.
 
   od memory tree <list|view|edit|move> [args]
       Inspect and edit the memory tree that is injected into agent prompts.
@@ -1302,144 +1280,6 @@ What the daemon does:
 }
 
 // ---------------------------------------------------------------------------
-// Subcommand: od amr …
-// ---------------------------------------------------------------------------
-
-async function runAmr(args) {
-  const sub = args[0];
-  if (!sub || sub === 'help' || args.includes('--help') || args.includes('-h')) {
-    console.log(`Usage:
-  od amr login [--json]
-  od amr logout [--json]
-  od amr status [--refresh] [--json]
-  od amr referral [--json]
-  od amr open [--target /dashboard] [--json]
-
-Options:
-  --daemon-url <url>   OpenDesign daemon HTTP base.
-  --refresh            Bypass the daemon's short wallet display cache.
-  --json               Emit raw JSON.`);
-    process.exit(sub === 'help' || args.includes('--help') || args.includes('-h') ? 0 : 2);
-  }
-  const rest = args.slice(1);
-  const flags = parseFlags(rest, { string: AMR_STRING_FLAGS, boolean: AMR_BOOLEAN_FLAGS });
-  const base = await cliDaemonBaseUrl(flags);
-  switch (sub) {
-    case 'referral': {
-      const response = await fetch(`${base}/api/integrations/vela/referral-summary`);
-      if (!response.ok) return structuredHttpFailure(response);
-      const summary = await response.json();
-      if (flags.json) return process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
-      console.log(`Campaign\t${summary.campaignStatus}`);
-      console.log(`Invitation rewards\t${summary.inviterIssuedCount}`);
-      console.log(`Available reset cards\t${summary.availableCardCount}`);
-      return;
-    }
-    case 'open': {
-      const response = await fetch(`${base}/api/amr/web-intent`, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({target:flags.target || '/dashboard?source=open_design'})});
-      if (!response.ok) return structuredHttpFailure(response);
-      const result = await response.json();
-      process.stdout.write(flags.json ? JSON.stringify(result, null, 2) + '\n' : result.url + '\n');
-      return;
-    }
-    case 'logout': {
-      const statusResp = await fetch(`${base}/api/integrations/vela/status`);
-      if (!statusResp.ok) throw new Error(`AMR status failed: HTTP ${statusResp.status}`);
-      const status = await statusResp.json() as {user?: {id?: string} | null; credentialRevision?: string};
-      if (!status.credentialRevision) throw new Error('Update Open Design before signing out: logout target verification is unavailable.');
-      const logoutResp = await fetch(`${base}/api/integrations/vela/logout`, {
-        method: 'POST',
-        headers: {'content-type': 'application/json'},
-        body: JSON.stringify({expectedAppUserId: status.user?.id ?? '', expectedCredentialRevision: status.credentialRevision}),
-      });
-      if (!logoutResp.ok) return structuredHttpFailure(logoutResp);
-      const result = await logoutResp.json();
-      if (flags.json) {
-        return process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-      }
-      console.log('AMR account\tsigned out');
-      return;
-    }
-    case 'login': {
-      const loginResp = await fetch(`${base}/api/integrations/vela/login`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      });
-      if (!loginResp.ok) return structuredHttpFailure(loginResp);
-      const started = await loginResp.json();
-      const statusResp = await fetch(`${base}/api/integrations/vela/status`);
-      if (!statusResp.ok) return structuredHttpFailure(statusResp);
-      const status = await statusResp.json();
-      if (flags.json) {
-        return process.stdout.write(JSON.stringify({ started, status }, null, 2) + '\n');
-      }
-      console.log(`Vela login\tstarted`);
-      console.log(`Profile\t${status?.profile ?? started?.profile ?? '-'}`);
-      if (status?.loggedIn) {
-        console.log(`Status\tlogged in`);
-        return;
-      }
-      console.log(`Status\t${status?.loginInFlight ? 'waiting for browser authorization' : 'sign-in pending'}`);
-      if (status?.activationUrl) console.log(`Open\t${status.activationUrl}`);
-      if (status?.userCode) console.log(`Code\t${status.userCode}`);
-      if (status?.browserOpenFailed) {
-        console.log(`Note\tbrowser could not be opened automatically; use the link above`);
-      }
-      return;
-    }
-    case 'status': {
-      const query = flags.refresh ? '?refresh=1' : '';
-      const statusResp = await fetch(`${base}/api/integrations/vela/status`);
-      if (!statusResp.ok) return structuredHttpFailure(statusResp);
-      const status = await statusResp.json();
-      let wallet = null;
-      if (status?.loggedIn && (!status?.account?.balanceUsd || flags.refresh)) {
-        const walletResp = await fetch(`${base}/api/integrations/vela/wallet${query}`);
-        if (walletResp.ok) wallet = await walletResp.json();
-        else if (flags.refresh && !status?.account?.balanceUsd) return structuredHttpFailure(walletResp);
-      }
-      const merged = {
-        ...status,
-        user: status?.user ?? wallet?.user ?? null,
-        account:
-          status?.loggedIn && wallet?.status === 'available'
-            ? {
-                ...(status?.account ?? {}),
-                balanceUsd: status?.account?.balanceUsd ?? wallet.balanceUsd,
-              }
-            : status?.account,
-        wallet,
-      };
-      if (flags.json) return process.stdout.write(JSON.stringify(merged, null, 2) + '\n');
-      const account = merged?.user?.email ?? merged?.user?.id ?? '-';
-      console.log(`AMR account\t${account}`);
-      console.log(`Profile\t${merged?.profile ?? '-'}`);
-      // Only present when this build was given a vela web console origin
-      // (OD_VELA_WEB_URL); printing it makes "which backend is this app
-      // pointed at" answerable without reading the packaged config.
-      if (merged?.consoleOrigin) console.log(`Console\t${merged.consoleOrigin}`);
-      if (merged?.account?.plan) console.log(`Plan\t${merged.account.plan}`);
-      if (merged?.account?.balanceUsd) {
-        console.log(`Wallet balance\t$${merged.account.balanceUsd}`);
-        if (wallet?.updatedAt || wallet?.fetchedAt) {
-          console.log(`Updated\t${wallet.updatedAt ?? wallet.fetchedAt}`);
-        }
-        console.log(`Source\t${wallet?.source ?? 'status_account'}`);
-        return;
-      }
-      console.log(`Wallet balance\tunavailable`);
-      console.log(`Status\t${wallet?.status ?? (merged?.loggedIn ? 'logged_in' : 'signed_out')}`);
-      if (wallet?.error?.message) console.log(`Reason\t${wallet.error.message}`);
-      return;
-    }
-    default:
-      console.error(`unknown subcommand: od amr ${sub}`);
-      process.exit(2);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Subcommand: od collab …  (team-edition collaboration)
 // ---------------------------------------------------------------------------
 
@@ -1481,10 +1321,8 @@ function printCollabHelp() {
   od collab accept <projectId> --version <n> [--dont-prompt-24h] --workspace <id> --workspace-member <id> [--json]
   od collab dismiss <projectId> --version <n> [--dont-prompt-24h] --workspace <id> --workspace-member <id> [--json]
   od collab ask-again <projectId> --workspace <id> --workspace-member <id> [--json]
-  od collab share-resource <design-systems|plugins|skills> <id> --workspace <id> --workspace-member <id> [--json]
-  od collab team-resources <design-systems|plugins|skills> --workspace <id> --workspace-member <id> [--json]
-  od collab share-design-system <designSystemId> --workspace <id> --workspace-member <id> [--json]
-  od collab team-design-systems --workspace <id> --workspace-member <id> [--json]
+  od collab share-resource <plugins|skills> <id> --workspace <id> --workspace-member <id> [--json]
+  od collab team-resources <plugins|skills> --workspace <id> --workspace-member <id> [--json]
 
 Team-edition collaboration: presence overlay + sync trigger. The
 client is authoritative about whether it is in a shared context, so it drives
@@ -1492,14 +1330,12 @@ the trigger; the daemon coalesces author edits and flushes at a run boundary,
 advancing the published head version members poll to learn when to pull.
 \`share\` is the team-share intent: it requests the project be published so
 members can pull it, and reports the sync state (local_only / pending_upload /
-synced / sync_failed). \`share-resource <kind> <id>\` promotes a personal design
-system, plugin, or skill into the team scope through the resource hub, and
-\`team-resources <kind>\` lists the ones already shared (the \`*-design-system\`
-forms are kept as aliases).
+synced / sync_failed). \`share-resource <kind> <id>\` promotes a personal plugin
+or skill into the team scope through the resource hub, and
+\`team-resources <kind>\` lists the ones already shared.
 
 Options:
   --project <id>          Project id (alternative to the positional argument).
-  --design-system <id>    Design system id for share-design-system.
   --workspace <id>        Explicit workspace id for request authorization.
   --workspace-member <id> Explicit workspace member id for request authorization.
   --member <id>           Member id for the presence heartbeat / leave.
@@ -1516,7 +1352,6 @@ Examples:
   od collab publish p1 --workspace team-1 --workspace-member m-42
   od collab share-resource plugins my-plugin --workspace team-1 --workspace-member m-42 --json
   od collab team-resources skills --workspace team-1 --workspace-member m-42 --json
-  od collab share-design-system user:palette-x --workspace team-1 --workspace-member m-42 --json
   od collab status p1 --workspace team-1 --workspace-member m-42 --json`);
 }
 
@@ -1538,12 +1373,10 @@ async function runCollab(args) {
   // — it takes a resource id, not a project id — so it runs before the project-id
   // requirement below. `share-resource <kind> <id>` / `team-resources <kind>` are
   // the generic forms; the design-system aliases are kept for compatibility.
-  const RESOURCE_BASE_PATHS = new Set(['design-systems', 'plugins', 'skills']);
+  const RESOURCE_BASE_PATHS = new Set(['plugins', 'skills']);
   if (
     sub === 'share-resource' ||
-    sub === 'team-resources' ||
-    sub === 'share-design-system' ||
-    sub === 'team-design-systems'
+    sub === 'team-resources'
   ) {
     const base = await cliDaemonBaseUrl(flags);
     const workspaceHeaders = workspaceHeadersFromExplicitFlags(flags, true);
@@ -1574,22 +1407,13 @@ async function runCollab(args) {
     let basePath;
     let isList;
     let resourceId;
-    if (sub === 'team-design-systems') {
-      basePath = 'design-systems';
-      isList = true;
-    } else if (sub === 'share-design-system') {
-      basePath = 'design-systems';
-      isList = false;
-      resourceId = flags['design-system'] || positionals[0];
-    } else {
-      basePath = positionals[0];
-      if (!RESOURCE_BASE_PATHS.has(basePath)) {
-        console.error('kind must be one of: design-systems | plugins | skills');
-        process.exit(2);
-      }
-      isList = sub === 'team-resources';
-      resourceId = positionals[1];
+    basePath = positionals[0];
+    if (!RESOURCE_BASE_PATHS.has(basePath)) {
+      console.error('kind must be one of: plugins | skills');
+      process.exit(2);
     }
+    isList = sub === 'team-resources';
+    resourceId = positionals[1];
 
     if (isList) {
       const body = await wsRequest('GET', `/api/workspace/${basePath}/team`);
@@ -3402,23 +3226,15 @@ Exit codes:
   if (!flags['no-daemon']) {
     const base = (await libraryDaemonUrl(flags)).replace(/\/$/, '');
     try {
-      const designSystemWorkspaceHeaders =
-        workspaceHeadersFromExplicitFlags(flags);
-      const [skillsResp, dsResp, atomsResp] = await Promise.all([
+      const [skillsResp, atomsResp] = await Promise.all([
         fetch(`${base}/api/skills`).catch(() => null),
-        fetch(`${base}/api/design-systems`, {
-          ...(designSystemWorkspaceHeaders
-            ? { headers: designSystemWorkspaceHeaders }
-            : {}),
-        }).catch(() => null),
         fetch(`${base}/api/atoms`).catch(() => null),
       ]);
       const skills = (skillsResp?.ok ? (await skillsResp.json())?.skills : []) ?? [];
-      const designSystems = (dsResp?.ok ? (await dsResp.json())?.designSystems : []) ?? [];
       const atoms = (atomsResp?.ok ? (await atomsResp.json())?.atoms : []) ?? [];
       registry = {
         skills:        skills.map((s) => ({ id: s.id, title: s.name ?? s.title, description: s.description })),
-        designSystems: designSystems.map((d) => ({ id: d.id, title: d.title })),
+        designSystems: [],
         craft:         [],
         atoms:         atoms.map((a) => ({ id: a.id, label: a.label })),
       };
@@ -11140,23 +10956,13 @@ or the daemon cannot be reached.`);
 
   // Library inventory
   try {
-    const designSystemWorkspaceHeaders = null;
-    const [skillsResp, dsResp, atomsResp] = await Promise.all([
+    const [skillsResp, atomsResp] = await Promise.all([
       fetch(`${base}/api/skills`),
-      fetch(`${base}/api/design-systems`, {
-        ...(designSystemWorkspaceHeaders
-          ? { headers: designSystemWorkspaceHeaders }
-          : {}),
-      }),
       fetch(`${base}/api/atoms`),
     ]);
     if (skillsResp.ok) {
       const data = await skillsResp.json();
       report.skills = data?.skills ?? [];
-    }
-    if (dsResp.ok) {
-      const data = await dsResp.json();
-      report.designSystems = data?.designSystems ?? [];
     }
     if (atomsResp.ok) {
       const data = await atomsResp.json();
@@ -11201,7 +11007,7 @@ or the daemon cannot be reached.`);
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   } else {
     console.log(`[doctor] daemon ${report.daemon?.bindHost ?? '?'}:${report.daemon?.port ?? '?'} pid=${report.daemon?.pid ?? '?'}`);
-    console.log(`[doctor] plugins: ${report.plugins.length} (skills ${report.skills.length}, design-systems ${report.designSystems.length}, atoms ${report.atoms.length})`);
+    console.log(`[doctor] plugins: ${report.plugins.length} (skills ${report.skills.length}, atoms ${report.atoms.length})`);
     if (report.issues.length === 0) {
       console.log('[doctor] no issues');
     } else {

@@ -176,11 +176,12 @@ describe('syncConfigToDaemon', () => {
     // ratchets it upward, so a stale local `false` can never re-arm first-run
     // onboarding on the daemon. Resetting is opt-in via `allowOnboardingReset`.
     expect(body).not.toHaveProperty('onboardingCompleted');
+    expect(body).not.toHaveProperty('designSystemId');
+    expect(body).not.toHaveProperty('disabledDesignSystems');
     expect(body).toMatchObject({
       agentId: DEFAULT_CONFIG.agentId,
       agentModels: DEFAULT_CONFIG.agentModels,
       skillId: DEFAULT_CONFIG.skillId,
-      designSystemId: DEFAULT_CONFIG.designSystemId,
       agentCliEnv: {
         claude: { CLAUDE_CONFIG_DIR: '~/.claude-2' },
         codex: { CODEX_HOME: '~/.codex-alt', CODEX_BIN: '~/bin/codex-next' },

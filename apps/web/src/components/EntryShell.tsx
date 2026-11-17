@@ -97,8 +97,6 @@ import type {
 } from '../types';
 import { CenteredLoader } from './Loading';
 import { DesignsTab } from './DesignsTab';
-import { DesignSystemsTab } from './DesignSystemsTab';
-import { BrandsTab } from './BrandsTab';
 import { EntryNavRail, type EntryView as EntryViewKind } from './EntryNavRail';
 import {
   buildProjectSearchCatalog,
@@ -2192,7 +2190,6 @@ export function EntryShell({
           }}
           onOpenSearch={() => setProjectSearchOpen(true)}
           open={railOpen}
-          inviteSlot={<HomeInviteTrigger signedOut={amrLoggedIn === false} context={railWorkspaceContext} />}
           topRightSlot={<>
             {topRightCampaignAudience || (homeCampaignHostsVisible && amrLoggedIn === true) ? (
             <>
@@ -2230,7 +2227,6 @@ export function EntryShell({
           // Keep the account slot neutral until Cloud answers successfully;
           // only a successful null context (or known local sign-out) may show
           // the sign-in card.
-          footerNotice={accountFooterNotice}
           /* Same catalog and same opener the 全部项目 grid uses below, so the
              rail's 最近浏览过 list and that view's 最近浏览过 tab are two views of
              ONE list rather than two sorts of two lists. */
@@ -2282,8 +2278,6 @@ export function EntryShell({
               <HomeView
                 {...homeViewProps}
                 isActive={view === 'home'}
-                referralNotice={<ReferralNotice accountId={amrLoggedIn === true ? amrAccountId : null} profile={amrRegistrationStatus?.profile?.trim() || amrProfile} consoleOrigin={amrRegistrationStatus?.consoleOrigin} active={view === 'home'} context={homeFundingContext} billing={workspaceBillingResponse} />}
-                inviteSurface={<HomeInviteSurface signedOut={amrLoggedIn === false} identityReady={!workspaceContextState.loading && !workspaceContextState.identityChangePending && !workspaceContextState.failure} accountId={amrLoggedIn === true ? amrAccountId : null} context={railWorkspaceContext} active={view === 'home'} onSignInRequested={() => { setInviteSignInRequest('start'); navigate({ kind: 'home', view: 'onboarding' }); }} openAfterSignIn={inviteSignInRequest === 'waiting'} onSignInInviteConsumed={() => setInviteSignInRequest(null)} />}
                 /* Home is the one composer in the shell and consumes the page
                    handoff. The community view used to dock a second HomeView
                    (`variant="dock"`) with a handoff of its own; that mount
@@ -2336,36 +2330,6 @@ export function EntryShell({
                 onUseSkill={useSkillFromLibrary}
               />
             </div>
-            <div data-testid="entry-view-design-systems" data-active={view === 'design-systems' ? 'true' : 'false'} {...inactiveViewProps(view === 'design-systems')}>
-              {designSystemsLoading ? (
-                <div className="entry-section">
-                  <DesignSystemsTab
-                    isActive={view === 'design-systems'}
-                    loading
-                    systems={[]}
-                    templates={templates}
-                    selectedId={defaultDesignSystemId}
-                    onSelect={onChangeDefaultDesignSystem}
-                    onCreate={onCreateDesignSystem}
-                    onOpenSystem={onOpenDesignSystem}
-                    onSystemsRefresh={onDesignSystemsRefresh}
-                  />
-                </div>
-              ) : (
-                <div className="entry-section">
-                  <DesignSystemsTab
-                    isActive={view === 'design-systems'}
-                    systems={designSystems}
-                    templates={templates}
-                    selectedId={defaultDesignSystemId}
-                    onSelect={onChangeDefaultDesignSystem}
-                    onCreate={onCreateDesignSystem}
-                    onOpenSystem={onOpenDesignSystem}
-                    onSystemsRefresh={onDesignSystemsRefresh}
-                  />
-                </div>
-              )}
-            </div>
             {LIBRARY_UI_VISIBLE ? (
               <div data-testid="entry-view-library" data-active={view === 'library' ? 'true' : 'false'} {...inactiveViewProps(view === 'library')}>
                 <LibrarySection
@@ -2376,13 +2340,6 @@ export function EntryShell({
                 />
               </div>
             ) : null}
-            <div data-testid="entry-view-brands" data-active={view === 'brands' ? 'true' : 'false'} {...inactiveViewProps(view === 'brands')}>
-              <BrandsTab
-                onApplyDesignSystem={onChangeDefaultDesignSystem}
-                onOpenProject={onOpenProject}
-                onDesignSystemsRefresh={onDesignSystemsRefresh}
-              />
-            </div>
             {view === 'integrations' ? (
               <IntegrationsView
                 config={config}

@@ -77,7 +77,7 @@ export function parseRoute(pathname: string): Route {
   const parts = pathname.replace(/\/+$/, '').split('/').filter(Boolean);
   if (parts.length === 0) return { kind: 'home', view: 'home' };
   if (parts[0] === 'onboarding') {
-    return { kind: 'home', view: 'onboarding' };
+    return { kind: 'home', view: 'home' };
   }
   if (parts[0] === 'projects') {
     if (parts[1]) {
@@ -109,19 +109,10 @@ export function parseRoute(pathname: string): Route {
     return { kind: 'home', view: 'projects' };
   }
   if (parts[0] === 'design-systems') {
-    if (parts[1] === 'create') {
-      return { kind: 'design-system-create' };
-    }
-    if (parts[1]) {
-      return { kind: 'design-system-detail', designSystemId: decodeURIComponent(parts[1]) };
-    }
-    return { kind: 'home', view: 'design-systems' };
+    return { kind: 'home', view: 'home' };
   }
   if (parts[0] === 'brands') {
-    // Brands merged into Design systems: a brand is a `user:<id>` design system
-    // and extraction now starts from the design-system create wizard. Legacy
-    // `/brands` and `/brands/:id` deep-links redirect onto the unified tab.
-    return { kind: 'home', view: 'design-systems' };
+    return { kind: 'home', view: 'home' };
   }
   if (parts[0] === 'automations' || parts[0] === 'tasks') {
     return { kind: 'home', view: 'tasks' };
@@ -177,14 +168,14 @@ export function parseRoute(pathname: string): Route {
 
 export function buildPath(route: Route): string {
   if (route.kind === 'home') {
-    if (route.view === 'onboarding') return '/onboarding';
+    if (route.view === 'onboarding') return '/';
     if (route.view === 'projects') return '/projects';
     if (route.view === 'tasks') return '/automations';
     if (route.view === 'plugins') return '/plugins';
-    if (route.view === 'design-systems') return '/design-systems';
+    if (route.view === 'design-systems') return '/';
     if (route.view === 'library') return LIBRARY_UI_VISIBLE ? '/library' : '/';
     if (route.view === 'brands') {
-      return route.brandId ? `/brands/${encodeURIComponent(route.brandId)}` : '/brands';
+      return '/';
     }
     if (route.view === 'integrations') return '/integrations';
     if (route.view === 'community') return '/community';
@@ -202,10 +193,7 @@ export function buildPath(route: Route): string {
     return route.projectId ? `/collab-demo/${encodeURIComponent(route.projectId)}` : '/collab-demo';
   }
   if (route.kind === 'community') return '/community';
-  if (route.kind === 'design-system-create') return '/design-systems/create';
-  if (route.kind === 'design-system-detail') {
-    return `/design-systems/${encodeURIComponent(route.designSystemId)}`;
-  }
+  if (route.kind === 'design-system-create' || route.kind === 'design-system-detail') return '/';
   const id = encodeURIComponent(route.projectId);
   const file = route.fileName
     ? route.fileName.split('/').map((s) => encodeURIComponent(s)).join('/')

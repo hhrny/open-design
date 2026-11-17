@@ -71,7 +71,6 @@ function kindFilters(t: Translate): Array<{ value: string; label: string }> {
     { value: '', label: t('library.kindAll') },
     { value: 'image', label: t('library.kindImages') },
     { value: 'element', label: t('library.kindElements') },
-    { value: 'design-system', label: t('library.kindDesignSystems') },
     { value: 'video', label: t('library.kindVideo') },
     { value: 'html', label: 'HTML' },
     { value: 'font', label: t('library.kindFonts') },

@@ -249,11 +249,6 @@ function categoryOrder(t: Translate): ReadonlyArray<{
       hint: t('mcp.categoryWebCaptureHint'),
     },
     {
-      id: 'design-systems',
-      label: t('mcp.categoryDesignSystems'),
-      hint: t('mcp.categoryDesignSystemsHint'),
-    },
-    {
       id: 'ui-components',
       label: t('mcp.categoryUiComponents'),
       hint: t('mcp.categoryUiComponentsHint'),

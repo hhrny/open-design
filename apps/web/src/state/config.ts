@@ -1100,12 +1100,11 @@ export function mergeDaemonConfig(
   if (daemonConfig.agentId !== undefined) {
     next.agentId = daemonConfig.agentId;
   }
+  if (next.agentId === 'amr') next.agentId = null;
   if (daemonConfig.skillId !== undefined) {
     next.skillId = daemonConfig.skillId;
   }
-  if (daemonConfig.designSystemId !== undefined) {
-    next.designSystemId = daemonConfig.designSystemId;
-  }
+  next.designSystemId = null;
   if (daemonConfig.agentModels) {
     next.agentModels = {
       ...(next.agentModels ?? {}),
@@ -1117,9 +1116,7 @@ export function mergeDaemonConfig(
   if (daemonConfig.disabledSkills !== undefined) {
     next.disabledSkills = daemonConfig.disabledSkills;
   }
-  if (daemonConfig.disabledDesignSystems !== undefined) {
-    next.disabledDesignSystems = daemonConfig.disabledDesignSystems;
-  }
+  next.disabledDesignSystems = [];
   if (daemonConfig.orbit !== undefined) {
     next.orbit = normalizeOrbit(daemonConfig.orbit);
   }
@@ -1288,14 +1285,12 @@ export async function syncConfigToDaemon(
       : options?.allowOnboardingReset
         ? { onboardingCompleted: false }
         : {}),
-    agentId: config.agentId,
+    agentId: config.agentId === 'amr' ? null : config.agentId,
     agentModels: config.agentModels,
     agentCliEnv: config.agentCliEnv,
     agentCliEnvIntent: config.agentCliEnvIntent,
     skillId: config.skillId,
-    designSystemId: config.designSystemId,
     disabledSkills: config.disabledSkills,
-    disabledDesignSystems: config.disabledDesignSystems,
     orbit: normalizeOrbit(config.orbit),
     installationId: config.installationId,
     telemetry: config.telemetry,

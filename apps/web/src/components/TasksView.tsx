@@ -43,7 +43,6 @@ type TemplateFilter =
   | 'all'
   | AutomationTemplateKind
   | 'memory'
-  | 'design-system'
   | 'skills'
   | 'connectors'
   | 'compression'
@@ -85,17 +84,6 @@ function buildStaticTemplates(t: TranslateFn): ReadonlyArray<AutomationTemplate>
       defaultName: 'Memory refresh',
       prompt:
         'Review recent chats, PR comments, design feedback, and project changes. Extract durable preferences, repeated decisions, and workflow lessons. Propose concise memory updates with source links and separate one-off notes from reusable guidance.',
-    },
-    {
-      id: 'design-system-refresh',
-      category: 'design-system',
-      kind: 'routine',
-      icon: 'sliders',
-      title: t('automations.tpl.designSystemRefresh.title'),
-      description: t('automations.tpl.designSystemRefresh.desc'),
-      defaultName: 'Design system maintainer',
-      prompt:
-        'Inspect recent generated artifacts, review feedback, and accepted revisions. Identify patterns that should become design-system tokens, component rules, examples, or anti-patterns. Draft precise updates to DESIGN.md and call out anything that needs human approval.',
     },
     {
       id: 'live-artifact-registry',
@@ -178,7 +166,6 @@ function templateFilters(t: TranslateFn): ReadonlyArray<{ id: TemplateFilter; la
     { id: 'orbit', label: t('automations.filterOrbit') },
     { id: 'live-artifact', label: t('automations.filterLiveArtifacts') },
     { id: 'memory', label: t('automations.filterMemory') },
-    { id: 'design-system', label: t('automations.filterDesignSystems') },
     { id: 'skills', label: t('automations.filterSkills') },
     { id: 'connectors', label: t('automations.filterConnectors') },
     { id: 'compression', label: t('automations.filterCompression') },

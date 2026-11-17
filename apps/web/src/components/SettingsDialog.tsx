@@ -165,7 +165,6 @@ import {
 } from '../lib/updater';
 import { PetSettings } from './pet/PetSettings';
 import { McpClientSection } from './McpClientSection';
-import { DesignSystemsSection } from './DesignSystemsSection';
 import { PrivacySection } from './PrivacySection';
 import { ProjectLocationsSection } from './ProjectLocationsSection';
 import { RoutinesSection } from './RoutinesSection';
@@ -261,7 +260,7 @@ export type SettingsSection =
 // so leaving it unmapped would deep-link into a section that renders nothing.
 //
 // Sections that keep their own render block but no longer have a nav item
-// (workspace, mcpClient, composio, designSystems) must NOT be listed: they
+// (workspace, mcpClient, composio) must NOT be listed: they
 // stay individually addressable through `initialSection`, and folding them
 // here would silently swallow a deep link into the wrong section.
 // `privacy` and `about` must not be listed either — they own nav items, and
@@ -275,6 +274,7 @@ function normalizeSettingsSection(section: SettingsSection): SettingsSection {
     case 'pet':
     case 'projectLocations':
     case 'critiqueTheater':
+    case 'designSystems':
       return 'general';
     default:
       return section;
@@ -4560,43 +4560,6 @@ export function SettingsDialog({
                 </button>
               </div>
               </div>
-              {cfg.mode === 'daemon' && !amrCardSignedIn ? (
-                // Only prompt to sign into OpenDesign Cloud when NOT already
-                // signed in — the AMR/vela session IS the cloud identity (one
-                // session drives both), so a logged-in user has nothing to do
-                // here and the callout was showing spuriously.
-                <div className="settings-cloud-signin-callout">
-                  <div>
-                    <strong className="settings-cloud-signin-callout__title">
-                      <span className="settings-cloud-signin-callout__title-icon" aria-hidden>
-                        <Icon name="sparkles" size={12} />
-                      </span>
-                      {t('entry.cloudCreditsTitle')}
-                    </strong>
-                    <p>{t('entry.cloudCreditsBody')}</p>
-                  </div>
-                  {/* Same device-auth flow as the 授权 button on the OpenDesign
-                      agent card below — the AMR/vela session IS the cloud
-                      identity, so signing in here is that one flow. This used to
-                      navigate to onboarding, which walked the user through the
-                      whole first-run tour to reach the same authorization. */}
-                  <AmrLoginPill
-                    className="settings-cloud-signin-callout__button"
-                    hideSignedOutStatus
-                    hideSignedInStatus
-                    initialStatus={amrCardStatus}
-                    skipInitialRefresh
-                    signInLabel={t('entry.cloudCreditsCta')}
-                    signInIcon="log-in"
-                    revealPendingCancelAction
-                    amrEntrySourceDetail="settings_cloud_callout"
-                    metricsConsent={cfg.telemetry?.metrics === true}
-                    installationId={cfg.installationId}
-                    onStatusChange={setAmrCardStatus}
-                    onSignedOut={onAmrSignedOut}
-                  />
-                </div>
-              ) : null}
               {cfg.mode === 'api' ? (
                 <div
                   className="protocol-chips protocol-chips--providers"
@@ -6072,15 +6035,6 @@ export function SettingsDialog({
 
           {activeSection === 'labs' ? (
             <LabsSection experiments={labsExperiments} autosave={labsAutosave} />
-          ) : null}
-
-          {activeSection === 'designSystems' ? (
-            <DesignSystemsSection
-              cfg={cfg}
-              setCfg={setCfg}
-              onDesignSystemsChanged={onDesignSystemsChanged}
-              onDesignSystemImportRebuildJob={onDesignSystemImportRebuildJob}
-            />
           ) : null}
 
           {activeSection === 'instructions' ? (

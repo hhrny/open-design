@@ -428,8 +428,7 @@ export function NewProjectPanel({
       ? s.scenario === 'orbit' && s.designSystemRequired === false
       : false;
   }, [tab, skills, startTemplateId, designTemplates]);
-  const showDesignSystemPicker =
-    tabSupportsDesignSystem && !tabDefaultSkillForcesNoDs;
+  const showDesignSystemPicker = false;
 
   useEffect(() => {
     if (dsSelectionTouched) return;

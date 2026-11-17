@@ -3312,6 +3312,21 @@ export async function startServer({
   // `res.ok` and the export continues without the evidence.
   app.use(CHAT_SCROLL_FORENSICS_PATH, chatScrollForensicsBodyParser);
   app.use(express.json({ limit: '4mb', verify: captureJsonBodySize }));
+  // Design Systems is no longer an exposed product capability. Keep the old
+  // implementation modules only as a read-compatibility boundary for existing
+  // project metadata, while making every public endpoint unreachable.
+  app.use('/api', (req, res, next) => {
+    if (/(^|\/)(?:design-systems?|brands)(?:\/|$)/.test(req.path)) {
+      return sendApiError(res, 404, 'FEATURE_REMOVED', 'Design Systems has been removed.');
+    }
+    if (
+      /^\/integrations\/vela\/(?:status|login(?:\/cancel)?|logout)$/.test(req.path)
+      || /^\/workspace\/invite(?:\/continue)?$/.test(req.path)
+    ) {
+      return sendApiError(res, 404, 'FEATURE_REMOVED', 'Account login has been removed.');
+    }
+    return next();
+  });
   const projectPreviewScopes = createProjectPreviewScopeRegistry();
 
   // Plan §3.K1 — API-token middleware.
@@ -10228,17 +10243,7 @@ export async function startServer({
     workspaceId?: string | null;
     workspaceMemberId?: string | null;
   } = {}) {
-    const [skills, designSystems] = await Promise.all([
-      listAllSkills(options),
-      listAllDesignSystems(
-        options.workspaceId !== undefined
-          ? {
-              workspaceId: options.workspaceId,
-              workspaceMemberId: options.workspaceMemberId ?? null,
-            }
-          : {},
-      ),
-    ]);
+    const skills = await listAllSkills(options);
     // Spec §23.3.3: surface the bundled scenario plugins so apply()
     // can fall back to the matching scenario's pipeline when the
     // consumer plugin omits od.pipeline. Each scenario carries a
@@ -10246,7 +10251,7 @@ export async function startServer({
     const scenarios = collectBundledScenarios();
     return {
       skills: skills.map((s) => ({ id: s.id, title: s.name, description: s.description })),
-      designSystems: designSystems.map((d) => ({ id: d.id, title: d.title })),
+      designSystems: [],
       craft: [],
       atoms: FIRST_PARTY_ATOMS.map((a) => ({ id: a.id, label: a.label })),
       scenarios,
@@ -10661,18 +10666,7 @@ export async function startServer({
     // blocks are skipped for these runs. Step 6 of the skill (replace with
     // the user's own content) is where brand application belongs.
     const isWebCloneRun = metadata?.intent === 'web-clone';
-    const designSystemSelection = isWebCloneRun
-      ? { id: null, source: 'none' }
-      : resolveEffectiveDesignSystemSelection({
-          requestDesignSystemId: designSystemId,
-          pluginDesignSystemId,
-          projectDesignSystemId: project?.designSystemId,
-          appDefaultDesignSystemId: appConfigForPrompt?.designSystemId,
-          disabledDesignSystemIds: appConfigForPrompt?.disabledDesignSystems,
-          // A project row with designSystemId=null can mean the user picked
-          // "No design system"; do not reapply the global default behind their back.
-          allowAppDefault: project === null,
-        });
+    const designSystemSelection = { id: null, source: 'none' };
     const effectiveDesignSystemId = designSystemSelection.id;
     const projectResourceScope =
       typeof projectId === 'string' && projectId
@@ -12237,8 +12231,8 @@ export async function startServer({
           activeSkillDirs: [],
           critiqueShouldRun: false,
           designSystemSelection: {
-            id: typeof designSystemId === 'string' ? designSystemId : null,
-            requestedId: typeof designSystemId === 'string' ? designSystemId : null,
+            id: null,
+            requestedId: null,
             source: 'none',
             digest: null,
           },
@@ -12255,7 +12249,7 @@ export async function startServer({
         projectId,
         skillId,
         skillIds,
-        designSystemId,
+        designSystemId: undefined,
         streamFormat: def?.streamFormat ?? 'plain',
         locale,
         sessionMode: runSessionMode,
@@ -12678,7 +12672,7 @@ export async function startServer({
       ...resolveChatExtraAllowedDirs({
         agentId,
         skillsDir: SKILLS_DIR,
-        designSystemsDir: DESIGN_SYSTEMS_DIR,
+        designSystemsDir: null,
         linkedDirs,
         activeSkillDirs,
         // OpenCode grants this root only after its read-only edit boundary is

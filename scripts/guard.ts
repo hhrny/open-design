@@ -6,21 +6,8 @@ import { parseSource, withNativeSourceParser, forEachNativeSource } from "./lib/
 
 import { checkCrossAppImports } from "./check-cross-app-imports.ts";
 import { checkTsNocheckImports } from "./check-ts-nocheck-imports.ts";
-import { checkDesignSystemManifests } from "./check-design-system-manifests.ts";
-import { checkDesignSystemPackageQuality } from "./check-design-system-package-quality.ts";
-import { checkDesignSystemComponentFixtureReport } from "./check-components-fixtures.ts";
-import { checkDesignSystemFlagParity } from "./check-design-system-flag-parity.ts";
-import { checkComponentsManifestExtraction } from "./check-components-manifest-extraction.ts";
 import { checkHtmlPluginPreviewContracts } from "./check-html-plugin-preview-contracts.ts";
 import { checkPluginPreviewManifest } from "./check-plugin-preview-manifest.ts";
-import {
-  checkDesignSystemA1RequiredTokens,
-  checkDesignSystemA2DefaultsParity,
-  checkDesignSystemA2RequiredTokens,
-  checkDesignSystemBSlotRequiredTokens,
-  checkDesignSystemTokenFixtureSync,
-  checkDesignSystemUnknownTokens,
-} from "./check-tokens-fixture-sync.ts";
 import { checkCraftReferences } from "./lint-craft-references.ts";
 import { checkWhatsNewDocument } from "./check-whats-new-document.ts";
 import { checkWhatsNewPublishWorkflow } from "./check-whats-new-publish-workflow.ts";
@@ -671,7 +658,6 @@ const productNeutralityCheckedPathPrefixes = [
   "apps/web/app/",
   "apps/web/src/",
   "craft/",
-  "design-systems/",
   "design-templates/",
   "docs/",
   "packages/contracts/src/",
@@ -1535,17 +1521,6 @@ const checks: GuardCheck[] = [
   { name: "what's new publish workflow", run: ({ repoRoot: root }) => checkWhatsNewPublishWorkflow(root) },
   { name: "HTML plugin preview contracts", run: ({ repoRoot: root }) => checkHtmlPluginPreviewContracts(root) },
   { name: "plugin preview manifest", run: checkPluginPreviewManifest },
-  { name: "design system manifests", run: checkDesignSystemManifests },
-  { name: "design system package quality", run: checkDesignSystemPackageQuality },
-  { name: "design system component fixture report", run: checkDesignSystemComponentFixtureReport },
-  { name: "design system token-fixture sync", run: checkDesignSystemTokenFixtureSync },
-  { name: "design system A1 required tokens", run: checkDesignSystemA1RequiredTokens },
-  { name: "design system A2 required tokens", run: checkDesignSystemA2RequiredTokens },
-  { name: "design system B-slot required tokens", run: checkDesignSystemBSlotRequiredTokens },
-  { name: "design system unknown token allowlist", run: checkDesignSystemUnknownTokens },
-  { name: "design system A2 defaults parity", run: checkDesignSystemA2DefaultsParity },
-  { name: "design system flag parity", run: checkDesignSystemFlagParity },
-  { name: "design system component manifest extraction", run: checkComponentsManifestExtraction },
 ];
 
 const isMain = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;

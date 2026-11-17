@@ -86,12 +86,7 @@ import {
   removeWorkspaceProjectTabs,
   WorkspaceTabsBar,
 } from './components/WorkspaceTabsBar';
-import { WorkspaceTopRightAccountCluster } from './components/EntryNavRail';
 import { ProjectWorkspaceRecoveryTip } from './components/ProjectWorkspaceRecoveryTip';
-import {
-  DesignSystemCreationFlow,
-  DesignSystemDetailView,
-} from './components/DesignSystemFlow';
 import {
   IframeKeepAliveProvider,
   useIframeKeepAlivePool,
@@ -114,7 +109,6 @@ import {
   daemonIsLive,
   fetchAppVersionInfo,
   fetchAgentsStream,
-  fetchDesignSystems,
   fetchDesignTemplates,
   invalidateProjectFilesCache,
   fetchPromptTemplates,
@@ -1228,7 +1222,7 @@ function AppInner() {
   }>(() => ({
     identity: currentWorkspaceCatalogIdentity,
     items: [],
-    ready: false,
+    ready: true,
   }));
   // A workspace-scoped response is safe to render only under the exact
   // identity it was fetched for. The replacement read starts in an effect, so
@@ -1258,11 +1252,8 @@ function AppInner() {
   // check, switching A -> B paints A's systems under B until B's request
   // finishes. Fail closed during that gap; opening the picker still reuses the
   // already-loaded list instantly when the identity has not changed.
-  const designSystems = workspaceDesignSystems.identity === currentWorkspaceCatalogIdentity
-    ? workspaceDesignSystems.items
-    : [];
+  const designSystems: DesignSystemSummary[] = [];
   const skillsRequestGenerationRef = useRef<Map<string, number>>(new Map());
-  const designSystemsRequestGenerationRef = useRef<Map<string, number>>(new Map());
   const [pendingDesignSystemRevisionJobs, setPendingDesignSystemRevisionJobs] = useState<
     Record<string, DesignSystemGenerationJob>
   >({});
@@ -1555,7 +1546,7 @@ function AppInner() {
     const { functional, templates } = skillRegistriesReadyRef.current;
     if (functional && templates) setSkillsLoading(false);
   }, []);
-  const [dsLoading, setDsLoading] = useState(true);
+  const [dsLoading, setDsLoading] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [projectListFailure, setProjectListFailure] = useState<{
     displayKey: string;
@@ -1627,15 +1618,14 @@ function AppInner() {
       && !workspaceContextState.identityChangePending && !projectsLoading
       && appliedProjectListWitness?.displayKey === currentProjectDisplayKey
       && projectListFailure?.displayKey !== currentProjectDisplayKey
-      && agentsReady && !agentsLoading && !skillsLoading && !dsLoading && !promptTemplatesLoading
+      && agentsReady && !agentsLoading && !skillsLoading && !promptTemplatesLoading
       && designTemplatesReady && promptTemplatesReady
-      && workspaceSkills.ready && workspaceDesignSystems.ready
-      && workspaceSkills.identity === currentWorkspaceCatalogIdentity
-      && workspaceDesignSystems.identity === currentWorkspaceCatalogIdentity,
+      && workspaceSkills.ready
+      && workspaceSkills.identity === currentWorkspaceCatalogIdentity,
   });
   // Page timing shares the authoritative Home gates, including scoped data.
   // Independent data-driven destinations report Ready in their own component.
-  const pageWithSharedData = route.kind === 'home' && ['home', 'onboarding', 'projects', 'drafts', 'all-projects', 'design-systems', 'brands', 'settings'].includes(route.view);
+  const pageWithSharedData = route.kind === 'home' && ['home', 'onboarding', 'projects', 'drafts', 'all-projects', 'settings'].includes(route.view);
   usePageNavigationReady({
     page: navigationPage(route),
     visible: pageWithSharedData && daemonAppConfigReady,
@@ -1643,11 +1633,10 @@ function AppInner() {
       && !workspaceContextState.identityChangePending && !projectsLoading
       && appliedProjectListWitness?.displayKey === currentProjectDisplayKey
       && projectListFailure?.displayKey !== currentProjectDisplayKey
-      && agentsReady && !agentsLoading && !skillsLoading && !dsLoading && !promptTemplatesLoading
+      && agentsReady && !agentsLoading && !skillsLoading && !promptTemplatesLoading
       && designTemplatesReady && promptTemplatesReady
-      && workspaceSkills.ready && workspaceDesignSystems.ready
+      && workspaceSkills.ready
       && workspaceSkills.identity === currentWorkspaceCatalogIdentity
-      && workspaceDesignSystems.identity === currentWorkspaceCatalogIdentity
       && (route.kind !== 'home' || route.view !== 'settings' || !composioConfigLoading),
     failure: pageWithSharedData && projectListFailure?.displayKey === currentProjectDisplayKey,
     scopeKey: currentProjectDisplayKey,
@@ -2534,44 +2523,6 @@ function AppInner() {
         markSkillRegistryReady('templates');
       });
 
-      const designSystemsContext = workspaceContextRef.current;
-      // A cached workspace identity already has an SSE lifecycle owner below. Do
-      // not race an eager bootstrap snapshot against its first onActive; the
-      // 250ms fallback covers shells where the stream never opens.
-      if (!workspaceContextHasWorkspaceIdentity(designSystemsContext)) {
-        const designSystemsWorkspaceIdentity = workspaceIdentityCacheKey(designSystemsContext);
-        const designSystemsAccountGeneration = currentWorkspaceAccountGeneration();
-        const designSystemsCatalogIdentity = JSON.stringify([
-          'workspace-account',
-          designSystemsAccountGeneration,
-          designSystemsWorkspaceIdentity,
-        ]);
-        const designSystemsRequestGeneration =
-          (designSystemsRequestGenerationRef.current.get(designSystemsCatalogIdentity) ?? 0) + 1;
-        designSystemsRequestGenerationRef.current.set(
-          designSystemsCatalogIdentity,
-          designSystemsRequestGeneration,
-        );
-        let ready = true;
-        void fetchDesignSystems(designSystemsContext, { onReadResult: success => { ready = success; } }).then((list) => {
-            if (
-              cancelled ||
-              workspaceContextStateRef.current.identityChangePending ||
-              designSystemsRequestGenerationRef.current.get(designSystemsCatalogIdentity)
-                !== designSystemsRequestGeneration ||
-              currentWorkspaceAccountGeneration() !== designSystemsAccountGeneration ||
-              workspaceIdentityCacheKey(workspaceContextRef.current)
-                !== designSystemsWorkspaceIdentity
-            ) return;
-            setWorkspaceDesignSystems({
-              identity: designSystemsCatalogIdentity,
-              items: list,
-              ready,
-            });
-            setDsLoading(false);
-          });
-      }
-
       const request = beginProjectListRequest(workspaceProjectViewRef.current);
       void listCurrentWorkspaceProjects({
         throwOnError: true,
@@ -2772,23 +2723,6 @@ function AppInner() {
     config.onboardingCompleted,
   ]);
 
-  // Auto-pick the default design system the same way — only after daemon
-  // config has merged so we never overwrite a daemon-stored selection.
-  useEffect(() => {
-    if (!daemonConfigLoaded || dsLoading) return;
-    if (config.designSystemId) return;
-    if (designSystems.length === 0) return;
-    const id =
-      designSystems.find((d) => d.id === 'default')?.id ?? designSystems[0]!.id;
-    setConfig((prev) => {
-      if (prev.designSystemId) return prev;
-      const next: AppConfig = { ...prev, designSystemId: id };
-      saveConfig(next);
-      void syncConfigToDaemon(next);
-      return next;
-    });
-  }, [daemonConfigLoaded, dsLoading, designSystems, config.designSystemId]);
-
   // One-shot self-healing migration for pets adopted before the
   // overlay learned atlas-row switching. If the stored pet is a
   // custom / codex pet whose imageUrl is a single-row strip
@@ -2916,52 +2850,14 @@ function AppInner() {
     forceTeamMaterialization?: boolean;
     materializedTeamIds?: readonly string[];
   }) => {
-    // Carry the captured Workspace/member identity on the request. The daemon
-    // verifies that exact membership instead of consulting mutable ambient
-    // Workspace state, and the same identity key prevents an A response from
-    // committing after the UI has moved to B.
-    if (workspaceContextStateRef.current.identityChangePending) return;
-    const issuedContext = workspaceContextRef.current;
-    const issuedIdentity = workspaceIdentityCacheKey(issuedContext);
-    const issuedAccountGeneration = currentWorkspaceAccountGeneration();
-    const issuedCatalogIdentity = JSON.stringify([
-      'workspace-account',
-      issuedAccountGeneration,
-      issuedIdentity,
-    ]);
-    const requestGeneration =
-      (designSystemsRequestGenerationRef.current.get(issuedCatalogIdentity) ?? 0) + 1;
-    designSystemsRequestGenerationRef.current.set(issuedCatalogIdentity, requestGeneration);
-    let ready = true;
-    const list = await fetchDesignSystems(issuedContext, { ...options, onReadResult: success => { ready = success; } });
-    if (
-      workspaceContextStateRef.current.identityChangePending
-      || designSystemsRequestGenerationRef.current.get(issuedCatalogIdentity)
-        !== requestGeneration
-      || currentWorkspaceAccountGeneration() !== issuedAccountGeneration
-      || workspaceIdentityCacheKey(workspaceContextRef.current) !== issuedIdentity
-    ) return;
-    setWorkspaceDesignSystems({ identity: issuedCatalogIdentity, items: list, ready });
-    // Bootstrap and this workspace-scoped refresh can overlap on launch.
-    // Either response is a complete catalog for the active daemon identity,
-    // so do not leave a successful refresh hidden behind bootstrap's loader
-    // when that duplicate request is cancelled or stalls.
+    void options;
+    setWorkspaceDesignSystems({
+      identity: currentWorkspaceCatalogIdentity,
+      items: [],
+      ready: true,
+    });
     setDsLoading(false);
-  }, []);
-
-  // The design-system catalog is verified against the exact Workspace/member
-  // identity. Re-read whenever either half changes; a role replacement can
-  // reuse the Workspace id while changing the authoritative membership.
-  useEffect(() => {
-    if (workspaceContextState.identityChangePending) return;
-    if (workspaceContextHasWorkspaceIdentity(workspaceContext)) return;
-    void refreshDesignSystems();
-  }, [
-    currentWorkspaceCatalogIdentity,
-    refreshDesignSystems,
-    workspaceContext?.workspaceType,
-    workspaceContextState.identityChangePending,
-  ]);
+  }, [currentWorkspaceCatalogIdentity]);
 
   const refreshSkills = useCallback(async () => {
     // Always scoped. `GET /api/skills` is fail-closed on a missing
@@ -5635,8 +5531,7 @@ function AppInner() {
   useEffect(() => {
     if (route.kind !== 'home') return;
     void refreshTemplates();
-    if (!workspaceContextHasWorkspaceIdentity(workspaceContext)) void refreshDesignSystems();
-  }, [route.kind, refreshTemplates, refreshDesignSystems, workspaceContext?.workspaceType]);
+  }, [route.kind, refreshTemplates]);
 
   // Existing card grids (DesignsTab, ProjectView), pickers (NewProjectPanel,
   // ChatComposer mention) all look skills up by id without caring whether
@@ -5675,13 +5570,7 @@ function AppInner() {
       ),
     [designTemplates, config.disabledSkills],
   );
-  const enabledDS = useMemo(
-    () =>
-      designSystems.filter(
-        (d) => !(config.disabledDesignSystems ?? []).includes(d.id),
-      ),
-    [designSystems, config.disabledDesignSystems],
-  );
+  const enabledDS: DesignSystemSummary[] = [];
 
   const handleCloseSettings = () => {
     // Closing Settings is still the canonical "I'm done" gesture now that
@@ -5894,49 +5783,6 @@ function AppInner() {
           }));
           navigate({ kind: 'home', view: 'home' });
         }}
-      />
-    );
-  } else if (route.kind === 'design-system-create') {
-    appMain = (
-      <DesignSystemCreationFlow
-        onBack={handleDesignSystemCreateBack}
-        designSystems={enabledDS}
-        onCreated={(projectId, project, conversationId) => {
-          if (project) {
-            setProjects((curr) => [
-              project,
-              ...curr.filter((p) => p.id !== project.id),
-            ]);
-          }
-          navigate({ kind: 'project', projectId, conversationId: conversationId ?? null, fileName: null });
-        }}
-        onProjectPrepared={(project) => {
-          setProjects((curr) => [
-            project,
-            ...curr.filter((p) => p.id !== project.id),
-          ]);
-        }}
-        onSystemsRefresh={refreshDesignSystems}
-        config={config}
-        onOpenConnectorsTab={() => openSettings('composio')}
-      />
-    );
-  } else if (route.kind === 'design-system-detail') {
-    appMain = (
-      <DesignSystemDetailView
-        id={route.designSystemId}
-        selectedId={config.designSystemId}
-        config={config}
-        agents={agents}
-        onBack={() => navigate({ kind: 'home', view: 'design-systems' })}
-        onOpenProject={(projectId) => void handleOpenProject(projectId)}
-        onSetDefault={handleChangeDefaultDesignSystem}
-        onSystemsRefresh={refreshDesignSystems}
-        onProjectsRefresh={refreshProjects}
-        initialRevisionJob={pendingDesignSystemRevisionJobs[route.designSystemId] ?? null}
-        onInitialRevisionJobConsumed={(jobId) =>
-          handleDesignSystemRevisionJobConsumed(route.designSystemId, jobId)
-        }
       />
     );
   } else if (route.kind === 'home' && route.view === 'settings') {
@@ -6184,7 +6030,7 @@ function AppInner() {
         defaultDesignSystemId={config.designSystemId}
         agents={agents}
         agentsLoading={agentsLoading}
-        amrLoggedIn={amrLoginStatus?.loggedIn ?? null}
+        amrLoggedIn={null}
         amrSessionState={amrLoginStatus?.sessionState}
         amrAccountPlan={
           amrLoginStatus?.account?.plan?.trim()
@@ -6192,8 +6038,7 @@ function AppInner() {
           || null
         }
         amrAccountId={amrLoginStatus?.user?.id ?? amrLoginStatus?.credentialRevision ?? null}
-        amrRegistrationStatus={amrLoginStatus}
-        onRegistrationInviteActiveChange={setRegistrationInviteActive}
+        amrRegistrationStatus={null}
         config={config}
         providerModelsCache={providerModelsCache}
         onProviderModelsCacheChange={setProviderModelsCache}
@@ -6214,9 +6059,7 @@ function AppInner() {
         skillsLoading={
           workspaceSkills.identity !== currentWorkspaceCatalogIdentity || skillsLoading
         }
-        designSystemsLoading={
-          workspaceDesignSystems.identity !== currentWorkspaceCatalogIdentity || dsLoading
-        }
+        designSystemsLoading={false}
         projectsLoading={projectsLoading}
         projectsLoadFailed={projectListFailure?.displayKey === currentProjectDisplayKey}
         promptTemplatesLoading={promptTemplatesLoading}
@@ -6284,37 +6127,10 @@ function AppInner() {
             Home and the other entry views mount theirs through EntryNavRail;
             the routes are mutually exclusive, so exactly one is on screen. */}
         {route.kind === 'project' ? (
-          <WorkspaceTopRightAccountCluster
-            amrProfile={amrProfileForConfig(config)}
-            workspaceQuotaStatus={amrLoginStatus}
-            onOpenSettings={openSettings}
-            onSignedOut={handleActiveCloudSignOut}
-            updaterSlot={
-              <UpdaterPopup
-                allowSilentUpdates={config.allowSilentUpdates}
-                silentUpdatePreferenceReady={daemonAppConfigReady}
-                onAllowSilentUpdatesChange={handleSilentUpdatePreferenceChange}
-              />
-            }
-            workspaceContextOverride={
-              activeProject?.workspaceId
-                ? activeProjectWorkspaceContext
-                : undefined
-            }
-            workspaceContextLoading={
-              activeProject?.workspaceId
-                ? projectRouteWorkspaceContext.loading
-                : undefined
-            }
-            amrLoggedIn={amrLoginStatus?.loggedIn ?? null}
-            amrAccountPlan={
-              amrLoginStatus?.account?.plan?.trim()
-              || amrLoginStatus?.user?.plan?.trim()
-              || null
-            }
-            amrAccountId={amrLoginStatus?.user?.id ?? amrLoginStatus?.credentialRevision ?? null}
-            metricsConsent={config.telemetry?.metrics === true}
-            installationId={config.installationId}
+          <UpdaterPopup
+            allowSilentUpdates={config.allowSilentUpdates}
+            silentUpdatePreferenceReady={daemonAppConfigReady}
+            onAllowSilentUpdatesChange={handleSilentUpdatePreferenceChange}
           />
         ) : null}
         {route.kind === 'project'

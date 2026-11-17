@@ -2859,7 +2859,7 @@ export function HomeView({
       // design system, so every product kind (not just prototype/deck) carries
       // the user's selection — the plugin's `designSystem` input is only the
       // apply-template hint and is kept in sync via handleDesignSystemChange.
-      const submittedDesignSystemId = designSystemId;
+      const submittedDesignSystemId = null;
       // Composer inputs are forwarded as-is; the deferred footer/media fields are
       // stripped from this set just below to form the run-facing inputs.
       const submittedApplyInputs = submittedActive ? submittedActive.inputs : defaultInputs;
@@ -3189,9 +3189,6 @@ export function HomeView({
         onPluginInputValuesChange={updateActiveInputs}
         inlineEditableInputNames={active?.editableInputNames ?? []}
         footerInputNames={footerInputNamesForChip(active?.chipId ?? null)}
-        designSystems={designSystemPickerSystems}
-        selectedDesignSystemId={designSystemId}
-        onDesignSystemChange={handleDesignSystemChange}
         stagedFiles={stagedFiles}
         onAddFiles={stageFiles}
         onRemoveFile={removeStagedFile}

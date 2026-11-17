@@ -323,7 +323,6 @@ import { AvatarMenu } from './AvatarMenu';
 import { Icon } from './Icon';
 import { useWorkspaceTabsDockRef } from './workspaceTabsDock';
 import { localizePluginTitle } from './plugins-home/localization';
-import { DesignSystemPicker } from './DesignSystemPicker';
 import { PresenceBar } from '../collab/PresenceBar';
 import { useProjectCollab } from '../collab/useProjectCollab';
 import { OwnedContentUpdate } from './OwnedContentUpdate';
@@ -15031,12 +15030,6 @@ export function ProjectView({
               continueBrandAgentExtractionBusy={brandAgentExtractionStarting}
               onContinueBrandExtraction={handleContinueBrandExtraction}
               continueBrandExtractionBusy={brandProgrammaticContinueStarting}
-              onCreateDesignFromActiveDesignSystem={handleCreateDesignFromActiveDesignSystem}
-              createDesignFromActiveDesignSystemBusy={brandCreateDesignStarting}
-              onCreateDesignSystemFromProject={
-                projectIsDesignSystemProject ? undefined : handleCreateDesignSystemFromProject
-              }
-              createDesignSystemFromProjectBusy={projectDesignSystemCreateStarting}
               onBrandBrowserAssistConfirm={handleBrandBrowserAssistConfirm}
               // The Home batch, drawn from the local bytes while it uploads.
               // Same tray, same cards, same "uploading" treatment the composer
@@ -15078,10 +15071,6 @@ export function ProjectView({
                 onProjectChange({ ...project, skillId });
               }}
               activePluginSnapshot={activePluginSnapshot}
-              currentDesignSystemId={projectDesignSystemId}
-              onActiveDesignSystemChange={(updatedProject) => {
-                onProjectChange(updatedProject);
-              }}
               onShowToast={(message) => {
                 setProjectActionsToast({ message, details: null });
               }}
@@ -15090,16 +15079,6 @@ export function ProjectView({
               collapseControlLifted={!workspaceFocused}
               backLabel={t('project.backToProjects')}
               composerFooterAccessory={executionControls}
-              designSystemPicker={(
-                <DesignSystemPicker
-                  variant="home"
-                  designSystems={designSystems}
-                  selectedId={projectDesignSystemId ?? null}
-                  workspaceContext={projectRunWorkspaceContext}
-                  disabled={projectMutationReadOnly}
-                  onChange={handleChangeDesignSystemId}
-                />
-              )}
             />
           ) : (
             <div className="pane" data-testid="chat-pane-loading">
@@ -15208,25 +15187,8 @@ export function ProjectView({
           activePluginActionPaths={activePluginActionPaths}
           focusMode={workspaceFocused}
           onFocusModeChange={setWorkspaceFocused}
-          designSystemProject={designSystemProject}
-          designSystemBrandId={designSystemBrandId}
-          designSystemEditable={designSystemEditable}
-          designSystemExtractionInProgress={designSystemExtractionInProgress}
-          defaultDesignSystemId={config.designSystemId}
-          onSetDefaultDesignSystem={onChangeDefaultDesignSystem}
-          onDesignSystemsRefresh={onDesignSystemsRefresh}
-          onCreateDesignSystemFromProject={
-            projectIsDesignSystemProject ? undefined : handleCreateDesignSystemFromProject
-          }
-          createDesignSystemFromProjectBusy={projectDesignSystemCreateStarting}
           onDuplicateProject={onDuplicateProject ? handleDuplicateProject : undefined}
           duplicateProjectBusy={projectDuplicateStarting}
-          onDeleteDesignSystemProject={onDeleteProject}
-          onDesignSystemNeedsWork={sendDesignSystemFeedback}
-          designSystemReview={currentProject.metadata?.designSystemReview}
-          onDesignSystemReviewDecision={persistDesignSystemReviewDecision}
-          onUseDesignSystem={onCreateProjectFromDesignSystem}
-          designSystemEditRequest={designSystemEditRequest}
           onConnectRepo={handleConnectRepo}
           githubConnected={githubConnected}
           commentPortalId={commentInspectorPortalId}
