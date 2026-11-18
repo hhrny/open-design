@@ -40,10 +40,6 @@ import {
 } from './core-slim.js';
 import { renderDirectionIndexBlock, renderDirectionSpecBlock } from './directions.js';
 import { renderDeckFrameworkDirective } from './deck-framework.js';
-import {
-  MEDIA_USER_REPLY_CONTRACT,
-  renderMediaGenerationContract,
-} from './media-contract.js';
 import { renderPanelPrompt } from './panel.js';
 import { defaultCritiqueConfig, type CritiqueConfig } from '@open-design/contracts/critique';
 import {
@@ -455,150 +451,6 @@ This project was created through the daemon API with \`skipDiscoveryBrief: true\
 // (2) state the handoff/exit-code semantics, and (3) pin the behavioral
 // rules agents historically fumbled (PowerShell translation, jq, asking
 // for API keys, substituting fal-ai/* model paths).
-const MEDIA_DISPATCH_HINT = `
-
----
-
-## Media generation (if asked)
-
-If the user asks you to generate an image, video, or audio file — regardless of which provider or model they mention (fal, Replicate, OpenAI, etc.) — use the daemon dispatcher via your **Bash tool**. Do NOT call provider REST APIs directly.
-
-OpenDesign Cloud models use the \`vela/*\` prefix. Never invoke the \`vela\`
-CLI directly for those models: the OD dispatcher owns trusted Workspace
-attribution, polling, downloads, and final project-file placement.
-
-The daemon injects these env vars into your shell (**POSIX bash — not PowerShell**):
-
-- \`OD_NODE_BIN\`   — absolute path to the Node runtime
-- \`OD_BIN\`        — absolute path to the OD CLI script
-- \`OD_PROJECT_ID\` — the active project id
-
-**Always use the generate→wait loop below.** \`media generate\` always exits 0 — either with \`{"file":{...}}\` if done within ~25s, or with \`{"taskId":"..."}\` as a handoff for slow models. Whenever the output contains a \`taskId\`, keep polling with \`media wait\` until exit 0 (done) or exit 5 (failed).
-
-Use **POSIX \`$VAR\` syntax** — do NOT translate to PowerShell (\`$env:VAR\`, \`&\` operator). Uses \`python3\` for JSON parsing (do NOT use \`jq\`):
-
-\`\`\`bash
-# POSIX bash — do NOT convert to PowerShell
-IMAGE_MODEL=IMAGE_MODEL_VALUE
-out=\$("$OD_NODE_BIN" "$OD_BIN" media generate \\
-  --project "$OD_PROJECT_ID" \\
-  --surface image \\
-  --model "$IMAGE_MODEL" \\
-  --prompt "..." \\
-  --aspect 16:9)
-ec=\$?
-if [ "\$ec" -ne 0 ]; then echo "\$out" >&2; exit "\$ec"; fi
-last=\$(printf '%s\\n' "\$out" | tail -1)
-task_id=\$(printf '%s\\n' "\$last" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('taskId',''))" 2>/dev/null)
-since=\$(printf '%s\\n' "\$last" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('nextSince',0))" 2>/dev/null)
-since="\${since:-0}"
-while [ -n "\$task_id" ]; do
-  out=\$("$OD_NODE_BIN" "$OD_BIN" media wait "\$task_id" --since "\$since")
-  ec=\$?
-  last=\$(printf '%s\\n' "\$out" | tail -1)
-  since=\$(printf '%s\\n' "\$last" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('nextSince',\$since))" 2>/dev/null)
-  since="\${since:-0}"
-  if [ "\$ec" -eq 0 ]; then
-    task_id=""
-  elif [ "\$ec" -ne 2 ]; then
-    echo "\$out" >&2; exit "\$ec"
-  fi
-done
-printf '%s\\n' "\$last"
-\`\`\`
-
-The command exits \`0\` with one line of JSON: \`{"file":{...}}\` when done within ~25s, or \`{"taskId":"..."}\` as a SUCCESSFUL handoff for slow models. On a handoff, run the exact \`media wait\` command the CLI prints on stderr and repeat it until exit \`0\` (done) or exit \`5\` (failed); exit \`2\` means still running — not a failure. Parse JSON with \`python3\`, never \`jq\`.
-
-${MEDIA_USER_REPLY_CONTRACT}
-
-MODEL_SELECTION_GUIDANCE`;
-
-function renderByokMediaDefaultsHint(defaults?: ByokMediaDefaults): string {
-  const lines: string[] = [];
-  const imageModel = defaults?.imageModel?.trim();
-  const videoModel = defaults?.videoModel?.trim();
-  const speechModel = defaults?.speechModel?.trim();
-  const speechVoice = defaults?.speechVoice?.trim();
-  if (imageModel) lines.push(`- Image model: \`${imageModel}\``);
-  if (videoModel) lines.push(`- Video model: \`${videoModel}\``);
-  if (speechModel) lines.push(`- Speech model: \`${speechModel}\``);
-  if (speechVoice) lines.push(`- Speech voice: \`${speechVoice}\``);
-  if (lines.length === 0) return '';
-  return `
-
-### Run-scoped BYOK media defaults
-
-The user selected these BYOK media defaults in the chat UI for this run. Use
-them when dispatching media unless the current user message explicitly asks for
-a different model or voice.
-${lines.join('\n')}`;
-}
-
-function shellDoubleQuote(value: string): string {
-  return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
-}
-
-function renderMediaDispatchModelGuidance(defaults?: ByokMediaDefaults): string {
-  const imageModel = defaults?.imageModel?.trim();
-  const videoModel = defaults?.videoModel?.trim();
-  const imagePart = imageModel
-    ? `For image generation prefer your configured model: \`${imageModel}\`.`
-    : 'For the best fal image model use `--model flux-pro-ultra`.';
-  const videoPart = videoModel
-    ? `For video prefer your configured model: \`${videoModel}\`.`
-    : 'For cloud video, read the current account/workspace catalogue with `od media models --cloud --json` before choosing a default. If it has no available video model, report the capability gap; never silently substitute an explicitly requested model or provider.';
-  return `${imagePart} ${videoPart} Always pass \`--surface\` explicitly (\`image\`, \`video\`, or \`audio\`). Any \`fal-ai/*\` path (e.g. \`fal-ai/flux/schnell\`, \`fal-ai/wan-i2v\`) is also a valid \`--model\` value for image/video — pass it through as-is without substitution.`;
-}
-
-function renderMediaDispatchHint(
-  defaults?: ByokMediaDefaults,
-  runtimeDefaults?: ByokMediaDefaults,
-): string {
-  const effectiveDefaults = runtimeDefaults ?? defaults;
-  const imageModel = effectiveDefaults?.imageModel?.trim() || 'flux-pro-ultra';
-  const hint = MEDIA_DISPATCH_HINT
-    .replace('IMAGE_MODEL_VALUE', shellDoubleQuote(imageModel))
-    .replace(
-      'MODEL_SELECTION_GUIDANCE',
-      renderMediaDispatchModelGuidance(effectiveDefaults),
-    );
-  return `${hint}${renderByokMediaDefaultsHint(defaults)}${renderRuntimeMediaDefaultsHint(runtimeDefaults, defaults)}`;
-}
-
-function mediaDefaultsForRuntime(
-  agentId: string | null | undefined,
-  defaults?: ByokMediaDefaults,
-): ByokMediaDefaults | undefined {
-  if (agentId !== 'amr') return defaults;
-  return {
-    ...defaults,
-    imageModel: defaults?.imageModel?.trim() || 'vela/gpt-image-2',
-    ...(defaults?.videoModel?.trim() ? { videoModel: defaults.videoModel.trim() } : {}),
-  };
-}
-
-function renderRuntimeMediaDefaultsHint(
-  runtimeDefaults: ByokMediaDefaults | undefined,
-  userDefaults: ByokMediaDefaults | undefined,
-): string {
-  if (!runtimeDefaults) return '';
-  const lines: string[] = [];
-  if (!userDefaults?.imageModel?.trim() && runtimeDefaults.imageModel?.trim()) {
-    lines.push(`- Image model: \`${runtimeDefaults.imageModel.trim()}\``);
-  }
-  if (!userDefaults?.videoModel?.trim() && runtimeDefaults.videoModel?.trim()) {
-    lines.push(`- Video model: \`${runtimeDefaults.videoModel.trim()}\``);
-  }
-  if (lines.length === 0) return '';
-  return `
-
-### OpenDesign Cloud media defaults
-
-This AMR run uses these managed media defaults when the user has not selected
-a different run-scoped model:
-${lines.join('\n')}`;
-}
-
 const FILESYSTEM_HANDOFF_OVERRIDE = `
 
 ---
@@ -985,10 +837,6 @@ export function composeSystemPrompt({
   // layered composition until the A/B comparison signs off.
   const isSlimCore = promptCoreVariant === 'slim';
   const isAskModeEarly = sessionMode === 'chat';
-  const runtimeMediaDefaults = mediaDefaultsForRuntime(
-    agentId,
-    byokMediaDefaults,
-  );
   // Media surfaces (image / video / audio) must be resolved BEFORE the head
   // is built: their generation contract, rather than the design charter's
   // HTML workflow, is the sole workflow authority on these runs.
@@ -1418,28 +1266,9 @@ export function composeSystemPrompt({
     resolvedExclusiveSurface === 'image'
     || resolvedExclusiveSurface === 'video'
     || resolvedExclusiveSurface === 'audio';
-  if (isAskMode) {
-    // Ask mode ships neither the media-generation contract nor the dispatch
-    // hint. The override above tells the agent to nudge the user toward Design
-    // mode for anything that actually generates media.
-  } else if (isMediaSurface) {
-    parts.push(renderMediaGenerationContract(mediaExecution, byokMediaDefaults));
-    const runtimeDefaultsHint = renderRuntimeMediaDefaultsHint(
-      runtimeMediaDefaults,
-      byokMediaDefaults,
-    );
-    if (runtimeDefaultsHint) parts.push(runtimeDefaultsHint);
-  } else if (mediaHintSignal ?? true) {
-    // Non-media projects (prototype, deck, etc.): inject a lightweight hint
-    // so the agent uses `od media generate` if the user asks for an image/video
-    // mid-session, rather than hunting for provider API keys in the environment.
-    // Gated on the media-intent signal: most conversations never mention
-    // media, and the transcript-scanned signal flips the hint on for the
-    // rest of the session as soon as one does.
-    (isSlimCore ? slimTurnVariableParts : parts).push(
-      renderMediaDispatchHint(byokMediaDefaults, runtimeMediaDefaults),
-    );
-  }
+  // Media-provider contracts and dispatcher hints are intentionally absent.
+  // User text reaches the selected runtime without Open Design provider
+  // selection, credentials, CLI commands, or model guidance appended to it.
 
   // Critique Theater addendum. When cfg.enabled is true the panel protocol
   // is pinned last so it overrides any softer critique wording earlier in the
@@ -1659,7 +1488,7 @@ If the rules below tell you to plan with TodoWrite, write the plan as prose inst
 // BYOK/API chat behave the same.
 const CHAT_MODE_OVERRIDE = `# Ask mode — bare conversation (this is the whole charter for this turn)
 
-This conversation is in OpenDesign Ask mode: a fast, low-overhead chat kept deliberately light to save tokens. OpenDesign is the open-source Claude Design alternative and a native Figma counterpart. Official links: GitHub https://github.com/nexu-io/open-design, website https://open-design.ai/, Discord https://discord.gg/mHAjSMV6gz.
+This conversation is in Ask mode: a fast, low-overhead chat kept deliberately light to save tokens. Answer the user's request directly using only the supplied working-directory and selected-file context.
 
 Behave like a direct, multi-turn desktop chat assistant. Prefer concise prose: answer the question, explain, compare options, debug prompts, and review existing work. You still have the user's project files, attachments, connectors, MCP servers, project memory, any active design system, and any skills they attached for this turn — use them as context, and follow an attached skill's workflow when one is present.
 
@@ -1768,6 +1597,9 @@ function renderMetadataBlock(
   );
   lines.push('');
   lines.push(`- **kind**: ${metadata.kind}`);
+  if (metadata.kind === 'image' || metadata.kind === 'video' || metadata.kind === 'audio') {
+    return lines.join('\n');
+  }
   if (metadata.platform) {
     lines.push(`- **platform**: ${metadata.platform}`);
   } else if (metadata.kind === 'prototype' || metadata.kind === 'template' || metadata.kind === 'other') {
@@ -1875,110 +1707,6 @@ function renderMetadataBlock(
       lines.push(`- **template**: ${metadata.templateLabel}`);
     }
   }
-  if (metadata.kind === 'image') {
-    lines.push(
-      `- **imageModel**: ${metadata.imageModel ?? '(not provided)'}`,
-    );
-    lines.push(
-      `- **aspectRatio**: ${metadata.imageAspect ?? '(not provided; common choices include 1:1, 16:9, or 9:16)'}`,
-    );
-    if (metadata.imageStyle) {
-      lines.push(`- **styleNotes**: ${metadata.imageStyle}`);
-    }
-    if (
-      metadata.promptTemplate?.title &&
-      typeof metadata.promptTemplate.prompt === 'string' &&
-      metadata.promptTemplate.prompt.trim().length > 0
-    ) {
-      lines.push(`- **referenceTemplate**: ${metadata.promptTemplate.title}`);
-    }
-    lines.push('');
-    lines.push(renderMediaMetadataAction(
-      'image',
-      '`"$OD_NODE_BIN" "$OD_BIN" media generate --surface image --model <imageModel>`',
-      mediaExecution,
-    ));
-  }
-  if (metadata.kind === 'video') {
-    lines.push(
-      `- **videoModel**: ${metadata.videoModel ?? '(not provided)'}`,
-    );
-    lines.push(
-      `- **lengthSeconds**: ${typeof metadata.videoLength === 'number' ? metadata.videoLength : '(not provided; common choices include 3s, 5s, or 10s)'}`,
-    );
-    lines.push(
-      `- **aspectRatio**: ${metadata.videoAspect ?? '(not provided; common choices include 16:9, 9:16, or 1:1)'}`,
-    );
-    if (
-      metadata.promptTemplate?.title &&
-      typeof metadata.promptTemplate.prompt === 'string' &&
-      metadata.promptTemplate.prompt.trim().length > 0
-    ) {
-      lines.push(`- **referenceTemplate**: ${metadata.promptTemplate.title}`);
-    }
-    lines.push('');
-    lines.push(renderMediaMetadataAction(
-      'video',
-      '`"$OD_NODE_BIN" "$OD_BIN" media generate --surface video --model <videoModel> --length <seconds> --aspect <ratio>`',
-      mediaExecution,
-    ));
-    if (metadata.videoModel === 'hyperframes-html') {
-      lines.push(
-        'Special case: `hyperframes-html` is a local HTML-to-MP4 renderer, not a photoreal text-to-video model. Treat it like a motion design renderer, ask at most one clarifying question, then create a HyperFrames composition with `"$OD_NODE_BIN" "$OD_BIN" media scaffold --composition-dir <rel>` under `.hyperframes-cache/`, edit `index.html`, and dispatch via `"$OD_NODE_BIN" "$OD_BIN" media generate --surface video --model hyperframes-html --composition-dir <rel>`. Do not run HyperFrames `init` or `render` yourself.',
-      );
-    }
-  }
-  if (metadata.kind === 'audio') {
-    lines.push(
-      `- **audioKind**: ${metadata.audioKind ?? '(not provided; common choices include music, speech, or sfx)'}`,
-    );
-    lines.push(
-      `- **audioModel**: ${metadata.audioModel ?? '(not provided)'}`,
-    );
-    lines.push(
-      `- **durationSeconds**: ${typeof metadata.audioDuration === 'number' ? metadata.audioDuration : '(not provided)'}`,
-    );
-    if (metadata.voice) {
-      lines.push(`- **voice**: ${metadata.voice}`);
-    } else if (metadata.audioKind === 'speech') {
-      lines.push('- **voice**: (not provided; relevant dimensions include voice id, accent, and pacing)');
-    }
-    const voiceOptions = shouldRenderElevenLabsVoiceOptions(metadata, audioVoiceOptions)
-      ? audioVoiceOptions ?? []
-      : [];
-    if (voiceOptions.length > 0) {
-      lines.push(
-        '- **ElevenLabs voice selection policy**: First infer from the current request, conversation, Plugin inputs, and available context. If the provider default can safely satisfy the brief, omit `--voice` and do not ask. Only when voice selection would materially change the requested result and no safe default can be inferred, emit the dropdown template below. Its visible labels are voice descriptions; the selected value must be the exact `voice_id` passed to `--voice`. Do not ask the user to type an id.',
-      );
-      if (voiceOptions.length > ELEVENLABS_VOICE_PROMPT_OPTION_LIMIT) {
-        lines.push(`- **ElevenLabs voice options**: showing the first ${ELEVENLABS_VOICE_PROMPT_OPTION_LIMIT} of ${voiceOptions.length} available voices.`);
-      }
-      lines.push('');
-      lines.push('Conditional template — do not emit unless the voice-selection policy above requires clarification:');
-      lines.push('<question-form id="elevenlabs-voice" title="Choose an ElevenLabs voice">');
-      lines.push(JSON.stringify(renderElevenLabsVoiceQuestionForm(voiceOptions), null, 2));
-      lines.push('</question-form>');
-    } else {
-      const audioVoiceOptionsPromptError = formatElevenLabsVoiceOptionsErrorForPrompt(audioVoiceOptionsError);
-      if (audioVoiceOptionsPromptError) {
-        lines.push(
-          `- **ElevenLabs voice options**: ${audioVoiceOptionsPromptError}`,
-        );
-      }
-    }
-    if (metadata.audioKind === 'sfx') {
-      lines.push(
-        '- **SFX discovery**: If the audible event cannot be inferred and a missing detail would materially change the result, clarify only the highest-impact unresolved dimensions. Relevant dimensions include sound source/action, materials, intensity, acoustic space, timing/tail, loop/non-loop, and "avoid" constraints. Do not ask for language or voice for SFX.',
-      );
-    }
-    lines.push('');
-    lines.push(renderMediaMetadataAction(
-      'audio',
-      '`"$OD_NODE_BIN" "$OD_BIN" media generate --surface audio --audio-kind <kind> --model <audioModel> --duration <seconds>` and add `--voice <voice-id>` for speech when you have a provider-specific voice id',
-      mediaExecution,
-    ));
-  }
-
   if (metadata.inspirationDesignSystemIds && metadata.inspirationDesignSystemIds.length > 0) {
     lines.push(
       `- **inspirationDesignSystemIds**: ${metadata.inspirationDesignSystemIds.join(', ')} — the user picked these systems as *additional* inspiration alongside the primary one. Borrow palette accents, typographic personality, or component patterns from them; don't replace the primary system's tokens.`,
@@ -2125,100 +1853,6 @@ function renderMetadataBlock(
   return lines.join('\n');
 }
 
-function renderMediaMetadataAction(
-  surface: MediaSurface,
-  command: string,
-  mediaExecution: MediaExecutionPolicy | undefined,
-): string {
-  const article = surface === 'audio' ? 'an' : 'a';
-  const mode = mediaExecution?.mode ?? 'enabled';
-  if (mode === 'disabled') {
-    return `This is ${article} **${surface}** project, but OpenDesign-owned media execution is disabled for this run. Plan the creative brief only unless an external MCP media tool is explicitly configured. Do NOT call OD media generation tools and do NOT emit \`<artifact>\` HTML for media surfaces.`;
-  }
-  return `This is ${article} **${surface}** project. Plan the creative brief carefully, then dispatch via the **media generation contract** using ${command}. Do NOT emit \`<artifact>\` HTML for media surfaces.`;
-}
-
-function shouldRenderElevenLabsVoiceOptions(
-  metadata: ProjectMetadata,
-  audioVoiceOptions: AudioVoiceOption[] | undefined,
-): boolean {
-  return metadata.kind === 'audio'
-    && metadata.audioKind === 'speech'
-    && metadata.audioModel === 'elevenlabs-v3'
-    && !metadata.voice
-    && Array.isArray(audioVoiceOptions)
-    && audioVoiceOptions.length > 0;
-}
-
-/**
- * OPEND-2707. 这道题曾经把「交上去的是 voice_id,不是你看到的那行描述」写在
- * 每题副标题(help 字段)里 —— 全仓唯一由仓库自己写出这个字段的地方。澄清卡不再
- * 渲染副标题之后,那句话写了就丢,所以它并进了 `label`。
- *
- * 为什么是 `label` 而不是别处:`FormQuestion` 没有题级 `description`(只有选项有),
- * `placeholder` 归 "Choose a voice" 占着 —— `label` 是唯一还会渲染、又属于这道题
- * 本身的位置。信息不能删:选项的可见文字是音色描述,不说一声用户看不出交上去的是 id。
- *
- * 这份 JSON 会被整段 `JSON.stringify` 进系统提示词,所以它同时是模型看到的
- * 「一道题可以长这样」的范例 —— 留一个 help 键在这里,撤发问就撤了个寂寞。
- * 钉在 `apps/daemon/tests/system-prompt-template.test.ts`,镜像那份钉在
- * `packages/contracts/tests/system-prompt-audio-voices.test.ts`。
- */
-function renderElevenLabsVoiceQuestionForm(voiceOptions: AudioVoiceOption[]): {
-  questions: Array<{
-    id: string;
-    label: string;
-    type: 'select';
-    required: boolean;
-    allowCustom: false;
-    placeholder: string;
-    options: Array<{ label: string; value: string }>;
-  }>;
-  submitLabel: string;
-} {
-  const options = voiceOptions.slice(0, ELEVENLABS_VOICE_PROMPT_OPTION_LIMIT).map((option) => ({
-    label: formatElevenLabsVoiceLabel(option),
-    value: option.voiceId,
-  }));
-  return {
-    questions: [
-      {
-        id: 'voice',
-        label: 'Voice — the answer submits the matching Voice ID',
-        type: 'select',
-        required: true,
-        allowCustom: false,
-        placeholder: 'Choose a voice',
-        options,
-      },
-    ],
-    submitLabel: 'Use voice',
-  };
-}
-
-function formatElevenLabsVoiceLabel(option: AudioVoiceOption): string {
-  const labels = option.labels && typeof option.labels === 'object'
-    ? Object.values(option.labels)
-        .map((value) => (typeof value === 'string' ? value.trim() : ''))
-        .filter(Boolean)
-    : [];
-  const bits = [...labels];
-  if (bits.length > 0) return `${option.name} — ${bits.join(' · ')}`;
-  const category = typeof option.category === 'string' ? option.category.trim() : '';
-  return category ? `${option.name} — ${category}` : option.name;
-}
-
-/**
- * Detect the seed/references pattern shipped by the upgraded
- * web-prototype / mobile-app / simple-deck / guizang-ppt skills, and
- * inject a hard pre-flight rule that lists which side files to Read
- * before doing anything else. The skill body's own workflow already says
- * this — but skills get truncated under context pressure and the agent
- * sometimes skips Step 0. A short up-front directive helps.
- *
- * Returns an empty string when the skill ships no side files (legacy
- * SKILL.md-only skills) so we don't add noise.
- */
 function derivePreflight(skillBody: string): string {
   const refs: string[] = [];
   if (/assets\/template\.html/.test(skillBody)) refs.push('`assets/template.html`');

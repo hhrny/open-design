@@ -40,7 +40,7 @@ afterEach(async () => {
   vi.resetModules();
 }, 30_000);
 
-it('removes design-system and account-login public capabilities', async () => {
+it('removes design-system, account-login, community, and media-provider capabilities', async () => {
   dataDir = await mkdtemp(join(tmpdir(), 'od-design-systems-removed-'));
   process.env.OD_DATA_DIR = dataDir;
   delete process.env.OD_WORKSPACE_CONTEXT_SOURCE;
@@ -78,6 +78,32 @@ it('removes design-system and account-login public capabilities', async () => {
       error: {
         code: 'FEATURE_REMOVED',
         message: 'Account login has been removed.',
+      },
+    });
+  }
+
+  const communityResponse = await fetch(`${started.url}/api/community/discord`);
+  expect(communityResponse.status).toBe(404);
+  await expect(communityResponse.json()).resolves.toMatchObject({
+    error: {
+      code: 'FEATURE_REMOVED',
+      message: 'Community has been removed.',
+    },
+  });
+
+  for (const [method, path] of [
+    ['GET', '/api/media/models'],
+    ['GET', '/api/media/config'],
+    ['PUT', '/api/media/config'],
+    ['POST', '/api/projects/example/media/generate'],
+    ['POST', '/api/tools/media/generate'],
+  ] as const) {
+    const response = await fetch(`${started.url}${path}`, { method });
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: 'FEATURE_REMOVED',
+        message: 'Media generation providers have been removed.',
       },
     });
   }

@@ -36,9 +36,10 @@ describe('DISCOVERY_AND_PHILOSOPHY (contracts copy) — TodoWrite plan item coun
     const prompt = composeSystemPrompt({ sessionMode: 'chat' });
 
     expect(prompt).toContain('# Ask mode — bare conversation');
-    expect(prompt).toContain('https://github.com/nexu-io/open-design');
-    expect(prompt).toContain('https://open-design.ai/');
-    expect(prompt).toContain('https://discord.gg/mHAjSMV6gz');
+    expect(prompt).not.toContain('https://github.com/nexu-io/open-design');
+    expect(prompt).not.toContain('https://open-design.ai/');
+    expect(prompt).not.toContain('https://discord.gg/mHAjSMV6gz');
+    expect(prompt).toContain('Answer the user\'s request directly');
     expect(prompt).toContain('Do not emit a default discovery `<question-form>`');
     // Ask mode is deliberately light: neither the ~3k-token discovery layer nor
     // the full designer charter is composed in. That omission IS the feature —
@@ -66,21 +67,20 @@ describe('DISCOVERY_AND_PHILOSOPHY (contracts copy) — TodoWrite plan item coun
 });
 
 describe('DISCOVERY_AND_PHILOSOPHY (contracts copy) — prompt routing parity', () => {
-  it('keeps image result copy user-friendly without discarding tool diagnostics', () => {
+  it('does not inject media-provider completion or failure copy', () => {
     const prompt = composeSystemPrompt({
       locale: 'zh-CN',
       metadata: { kind: 'image' } as any,
     });
 
-    expect(prompt).toContain('reply exactly `图片已生成`');
-    expect(prompt).toContain('提示词没通过内容审核 —— 换个说法、去掉敏感内容再试。');
-    expect(prompt).toContain(
+    expect(prompt).not.toContain('reply exactly `图片已生成`');
+    expect(prompt).not.toContain('提示词没通过内容审核 —— 换个说法、去掉敏感内容再试。');
+    expect(prompt).not.toContain(
       '图片没生成出来,不是你的操作有误 —— 这次是 Open Design 自己的问题,我们已经记下了。重试一般能恢复;反复出现的话联系我们。',
     );
     // OPEND-2577: an internal code is a support ticket, not a next step.
     expect(prompt).not.toContain('错误代码');
     expect(prompt).not.toContain('图片生成服务暂时不可用');
-    expect(prompt).toContain('tool output and daemon logs');
     expect(prompt).not.toContain('surface the actual stderr / exit status');
   });
 
@@ -294,6 +294,6 @@ describe('composeSystemPrompt', () => {
 
     expect(prompt).not.toContain('# OD core directives');
     expect(prompt).not.toContain('<question-form id="discovery"');
-    expect(prompt).toContain('## Media generation contract');
+    expect(prompt).not.toContain('## Media generation contract');
   });
 });

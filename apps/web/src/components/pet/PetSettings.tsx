@@ -9,7 +9,6 @@ import { DEFAULT_PET } from '../../state/config';
 import {
   codexPetSpritesheetUrl,
   fetchCodexPets,
-  syncCommunityPets,
 } from '../../providers/registry';
 import {
   CUSTOM_PET_ID,
@@ -72,58 +71,29 @@ export function PetSettings({ cfg, setCfg }: Props) {
   } | null>(null);
   const [atlasRowIndex, setAtlasRowIndex] = useState<number>(0);
   const [atlasBusy, setAtlasBusy] = useState(false);
-  const hatchCopiedTimerRef = useRef<number | null>(null);
-  // "Hatch with AI" prompt scratchpad. The user types a short pet
-  // concept here, we splice it into a ready-to-paste hatch-pet skill
-  // prompt, then they copy or run it from chat.
-  const [hatchConcept, setHatchConcept] = useState('');
-  const [hatchCopied, setHatchCopied] = useState(false);
   // "Recently hatched" — the daemon scans `${CODEX_HOME:-$HOME/.codex}/pets/`
   // for pets packaged by the upstream hatch-pet skill and surfaces them
   // here so the user can one-click adopt without going through the
   // file-picker import path.
   const [codexPets, setCodexPets] = useState<CodexPetSummary[]>([]);
   const [codexPetsLoading, setCodexPetsLoading] = useState(false);
-  const [codexPetsRoot, setCodexPetsRoot] = useState<string>('');
   const [codexAdopting, setCodexAdopting] = useState<string | null>(null);
   const [petActionStatus, setPetActionStatus] = useState<{
     kind: 'shown' | 'hidden' | 'adopted';
     name?: string;
   } | null>(null);
-  // Community catalog sync — calls the daemon-side port of the
-  // `sync-community-pets` script which fetches the latest pets from
-  // Codex Pet Share + j20 Hatchery into `~/.codex/pets/`. We surface
-  // the run summary (or error) inline below the head row so users get
-  // direct feedback after the long-running download.
-  const [communitySyncing, setCommunitySyncing] = useState(false);
-  const [communitySyncStatus, setCommunitySyncStatus] = useState<
-    | { kind: 'done'; wrote: number; total: number }
-    | { kind: 'error'; error: string }
-    | null
-  >(null);
-
-  useEffect(() => {
-    return () => {
-      if (hatchCopiedTimerRef.current !== null) {
-        window.clearTimeout(hatchCopiedTimerRef.current);
-        hatchCopiedTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  // Tab routing — split the panel into three exclusive surfaces
-  // (built-in / custom / community) so each "where do my pets come
+  // Tab routing — split the panel into two exclusive surfaces
+  // (built-in / custom) so each "where do my pets come
   // from" choice has its own dedicated space and the user feels like
   // they are picking from a single source rather than hunting through
   // a long stack of subsections.
   //
-  // Both bundled (Built-in) and user-hatched (Community) pets adopt
-  // into the custom slot — they share `petId === CUSTOM_PET_ID`. We
+  // Bundled pets adopt into the custom slot. We
   // bias the initial tab toward "Built-in" since that is the most
   // discoverable surface; the only time we land in Custom is when the
   // user has authored a strip-mode custom pet (uploaded image without
   // a Codex atlas), which can't have come from a bundled adoption.
-  type PetSourceTab = 'builtIn' | 'custom' | 'community';
+  type PetSourceTab = 'builtIn' | 'custom';
   const initialTab: PetSourceTab =
     pet.petId === CUSTOM_PET_ID && pet.custom.imageUrl && !pet.custom.atlas
       ? 'custom'
@@ -142,38 +112,10 @@ export function PetSettings({ cfg, setCfg }: Props) {
     try {
       const result = await fetchCodexPets();
       setCodexPets(result.pets);
-      setCodexPetsRoot(result.rootDir);
     } finally {
       setCodexPetsLoading(false);
     }
   }, []);
-
-  const handleCommunitySync = useCallback(async () => {
-    setCommunitySyncing(true);
-    setCommunitySyncStatus(null);
-    try {
-      const result = await syncCommunityPets();
-      if (result.error) {
-        setCommunitySyncStatus({ kind: 'error', error: result.error });
-      } else {
-        setCommunitySyncStatus({
-          kind: 'done',
-          wrote: result.wrote,
-          total: result.total,
-        });
-      }
-      // Pull the freshly-synced pets into the grid even on a partial
-      // failure — the daemon writes whatever succeeded before erroring.
-      await refreshCodexPets();
-    } catch (err) {
-      setCommunitySyncStatus({
-        kind: 'error',
-        error: err instanceof Error ? err.message : 'Sync request failed',
-      });
-    } finally {
-      setCommunitySyncing(false);
-    }
-  }, [refreshCodexPets]);
 
   useEffect(() => {
     void refreshCodexPets();
@@ -386,49 +328,6 @@ export function PetSettings({ cfg, setCfg }: Props) {
     }
   }
 
-  // Build the ready-to-paste hatch-pet skill prompt. The skill is
-  // vendored under `skills/hatch-pet/` so any chat agent can run it;
-  // this prompt is just the friendly wrapper that names the concept
-  // and points the agent at the right skill.
-  const hatchPrompt = useMemo(() => {
-    const concept = hatchConcept.trim();
-    const intro = concept
-      ? `Hatch a Codex-compatible animated pet for me. Concept: ${concept}.`
-      : 'Hatch a Codex-compatible animated pet for me.';
-    return [
-      intro,
-      '',
-      'Use the @hatch-pet skill end-to-end:',
-      '1. Generate the base look with $imagegen.',
-      '2. Generate every row strip (idle, running-right, waving, jumping, failed, waiting, running, review).',
-      '3. Mirror running-left from running-right only when the design is symmetric.',
-      '4. Run the deterministic scripts (extract / compose / validate / contact-sheet / videos).',
-      '5. Package the result into ${CODEX_HOME:-$HOME/.codex}/pets/<pet-name>/ with pet.json + spritesheet.webp.',
-      '',
-      'When the spritesheet is saved, tell me the absolute path so I can import it into OpenDesign via Settings → Pets → Import Codex sprite.',
-    ].join('\n');
-  }, [hatchConcept]);
-
-  async function copyHatchPrompt() {
-    try {
-      await navigator.clipboard.writeText(hatchPrompt);
-      setHatchCopied(true);
-      if (hatchCopiedTimerRef.current !== null) {
-        window.clearTimeout(hatchCopiedTimerRef.current);
-      }
-      hatchCopiedTimerRef.current = window.setTimeout(() => {
-        hatchCopiedTimerRef.current = null;
-        setHatchCopied(false);
-      }, 1800);
-    } catch {
-      if (hatchCopiedTimerRef.current !== null) {
-        window.clearTimeout(hatchCopiedTimerRef.current);
-        hatchCopiedTimerRef.current = null;
-      }
-      setHatchCopied(false);
-    }
-  }
-
   // Resolved view of the custom pet so the preview / picker rows can
   // share the same sprite renderer used by the overlay.
   const customPreview = resolveActivePet({
@@ -437,16 +336,9 @@ export function PetSettings({ cfg, setCfg }: Props) {
     petId: CUSTOM_PET_ID,
   })!;
 
-  // Built-in pets are the bundled spritesheets baked into the repo at
-  // `assets/community-pets/<id>/`; the daemon flags them with
-  // `bundled: true` so they land here. Community pets are the
-  // user-hatched / synced pets that live under `~/.codex/pets/`.
+  // Built-in pets are bundled spritesheets flagged by the daemon.
   const bundledPets = useMemo(
     () => codexPets.filter((p) => p.bundled),
-    [codexPets],
-  );
-  const communityPets = useMemo(
-    () => codexPets.filter((p) => !p.bundled),
     [codexPets],
   );
   const selectedPetPreview = pet.adopted ? resolveActivePet(pet) : null;
@@ -471,9 +363,7 @@ export function PetSettings({ cfg, setCfg }: Props) {
     }
   }
 
-  // Shared card renderer used by both the Built-in and Community tabs
-  // so the visual treatment stays consistent — the only difference
-  // between the two grids is which subset of `codexPets` they show.
+  // Shared card renderer for bundled pets.
   function renderCodexCard(
     p: CodexPetSummary,
     options?: { defaultChoice?: boolean },
@@ -601,22 +491,6 @@ export function PetSettings({ cfg, setCfg }: Props) {
               }}
             >
               {t('pet.tabCustom')}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'community'}
-              className={activeTab === 'community' ? 'active' : ''}
-              onClick={() => {
-                trackSettingsPetsClick(analytics.track, {
-                  page_name: 'settings',
-                  area: 'pets',
-                  element: 'community',
-                });
-                setActiveTab('community');
-              }}
-            >
-              {t('pet.tabCommunity')}
             </button>
           </div>
           <div className="pet-wake-controls">
@@ -969,113 +843,6 @@ export function PetSettings({ cfg, setCfg }: Props) {
       </div>
       ) : null}
 
-      {activeTab === 'community' ? (
-        <div className="pet-community">
-          <div className="pet-codex">
-            <div className="pet-codex-head">
-              <div>
-                <h4>{t('pet.codexTitle')}</h4>
-                <p className="hint">
-                  {codexPetsRoot
-                    ? t('pet.codexSubtitleWithDir', { dir: codexPetsRoot })
-                    : t('pet.codexSubtitle')}
-                </p>
-              </div>
-              <div className="pet-codex-head-actions">
-                <button
-                  type="button"
-                  className="seg-btn small"
-                  onClick={() => void handleCommunitySync()}
-                  disabled={communitySyncing}
-                  title={t('pet.communitySyncTitle')}
-                >
-                  <Icon
-                    name={communitySyncing ? 'spinner' : 'download'}
-                    size={14}
-                  />
-                  <span>
-                    {communitySyncing
-                      ? t('pet.communitySyncing')
-                      : t('pet.communitySync')}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="seg-btn small ghost"
-                  onClick={() => void refreshCodexPets()}
-                  disabled={codexPetsLoading}
-                  title={t('pet.codexRefresh')}
-                >
-                  <Icon
-                    name={codexPetsLoading ? 'spinner' : 'refresh'}
-                    size={14}
-                  />
-                  <span>{t('pet.codexRefresh')}</span>
-                </button>
-              </div>
-            </div>
-            {communitySyncStatus ? (
-              <p
-                className={`hint pet-codex-sync-status${communitySyncStatus.kind === 'error' ? ' error' : ''}`}
-                role="status"
-              >
-                {communitySyncStatus.kind === 'done'
-                  ? t('pet.communitySyncDone', {
-                      wrote: communitySyncStatus.wrote,
-                      total: communitySyncStatus.total,
-                    })
-                  : t('pet.communitySyncFailed', {
-                      error: communitySyncStatus.error,
-                    })}
-              </p>
-            ) : null}
-            {communityPets.length === 0 ? (
-              <p className="hint pet-codex-empty">
-                {codexPetsLoading ? t('pet.codexLoading') : t('pet.codexEmpty')}
-              </p>
-            ) : (
-              <div
-                className="pet-codex-grid"
-                role="radiogroup"
-                aria-label={t('pet.codexTitle')}
-              >
-              {communityPets.map((p) => renderCodexCard(p))}
-              </div>
-            )}
-          </div>
-
-          <div className="pet-hatch">
-            <div className="pet-hatch-head">
-              <div>
-                <h4>{t('pet.hatchTitle')}</h4>
-                <p className="hint">{t('pet.hatchHint')}</p>
-              </div>
-            </div>
-            <label className="field">
-              <span className="field-label">{t('pet.hatchConcept')}</span>
-              <input
-                type="text"
-                maxLength={140}
-                value={hatchConcept}
-                placeholder={t('pet.hatchConceptPlaceholder')}
-                onChange={(e) => setHatchConcept(e.target.value)}
-              />
-            </label>
-            <pre className="pet-hatch-prompt" aria-live="polite">{hatchPrompt}</pre>
-            <div className="pet-hatch-actions">
-              <button
-                type="button"
-                className="seg-btn small"
-                onClick={() => void copyHatchPrompt()}
-              >
-                <Icon name={hatchCopied ? 'check' : 'copy'} size={14} />
-                <span>{hatchCopied ? t('pet.hatchCopied') : t('pet.hatchCopy')}</span>
-              </button>
-            </div>
-            <p className="hint pet-hatch-foot">{t('pet.hatchFoot')}</p>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

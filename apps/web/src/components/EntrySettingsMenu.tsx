@@ -1,15 +1,8 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react';
-import {
-  buildSocialSharePayload,
-  OPEN_DESIGN_GITHUB_REPO_URL,
-  type SocialShareRequest,
-  type SocialShareResponse,
-} from '@open-design/contracts';
 import {
   LOCALE_LABEL,
   LOCALES,
@@ -22,14 +15,9 @@ import {
   trackSettingsPopoverClick,
   trackSettingsPopoverSurfaceView,
 } from '../analytics/events';
-import { createSocialSharePayload } from '../providers/registry';
 import type { AppConfig } from '../types';
-import { formatDiscordPresenceCount, useDiscordPresence } from './useDiscordPresence';
 import { Icon } from './Icon';
-import { SocialShareGrid } from './SocialShareGrid';
 import { enterpriseUrl } from './enterpriseUrl';
-import { communityForLocale } from '../lib/community-links';
-import { FeishuIcon } from './chat/support-brand-icons';
 
 const X_URL = 'https://x.com/OpenDesignHQ';
 const THREADS_URL = 'https://www.threads.com/@opendesign.ai';
@@ -81,36 +69,11 @@ export function EntrySettingsMenu({
   const analytics = useAnalytics();
   const t = useT();
   const { locale, setLocale } = useI18n();
-  const community = communityForLocale(locale);
-  const discordPresence = useDiscordPresence(community.platform === 'discord');
   const [open, setOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
-  const [openDesignShare, setOpenDesignShare] = useState<SocialShareResponse | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const langListRef = useRef<HTMLDivElement | null>(null);
-  const discordOnlineLabel = discordPresence
-    ? t('entry.discordOnlineLabel', {
-        count: formatDiscordPresenceCount(discordPresence.onlineCount),
-      })
-    : null;
-  const openDesignShareRequest = useMemo<SocialShareRequest>(() => {
-    const text = t('socialShare.openDesignText');
-    return {
-      kind: 'open-design-repo',
-      locale,
-      title: t('socialShare.openDesignTitle'),
-      text,
-      copyText: t('socialShare.openDesignCopyText', {
-        text,
-        url: OPEN_DESIGN_GITHUB_REPO_URL,
-      }),
-    };
-  }, [locale, t]);
-  const fallbackOpenDesignShare = useMemo(
-    () => buildSocialSharePayload(openDesignShareRequest),
-    [openDesignShareRequest],
-  );
 
   useEffect(() => {
     if (!open) setLangOpen(false);
@@ -155,22 +118,6 @@ export function EntrySettingsMenu({
       area: 'settings_popover',
     });
   }, [open, analytics.track, pageName]);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setOpenDesignShare(null);
-    void createSocialSharePayload(openDesignShareRequest)
-      .then((payload) => {
-        if (!cancelled) setOpenDesignShare(payload);
-      })
-      .catch(() => {
-        if (!cancelled) setOpenDesignShare(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, openDesignShareRequest]);
 
   return (
     <div className="entry-settings-menu" ref={wrapRef}>
@@ -277,28 +224,6 @@ export function EntrySettingsMenu({
             </div>
           </section>
 
-          <section className="entry-settings-menu__section">
-            <div className="entry-settings-menu__section-title">
-              <Icon name="external-link" size={14} />
-              <span>{t('socialShare.openDesignSection')}</span>
-            </div>
-            <SocialShareGrid
-              share={openDesignShare ?? fallbackOpenDesignShare}
-              className="entry-settings-social-share"
-              onShare={(platform) => {
-                trackSettingsPopoverClick(analytics.track, {
-                  page_name: pageName,
-                  area: 'settings_popover',
-                  element: 'share_channel',
-                  channel: platform,
-                });
-              }}
-              onAfterShare={() => setOpen(false)}
-            />
-          </section>
-
-          <div className="entry-settings-menu__divider" aria-hidden />
-
           <a
             className="entry-settings-menu__item"
             href={enterpriseUrl(locale)}
@@ -319,35 +244,6 @@ export function EntrySettingsMenu({
             </span>
             <span>{t('entry.workspaceTeamsLabel')}</span>
             <Icon name="external-link" size={12} className="entry-settings-menu__item-end" />
-          </a>
-          <a
-            className="entry-settings-menu__item"
-            href={community.href}
-            target="_blank"
-            rel="noreferrer noopener"
-            role="menuitem"
-            data-community-platform={community.platform}
-            onClick={() => {
-              trackSettingsPopoverClick(analytics.track, {
-                page_name: pageName,
-                area: 'settings_popover',
-                element: community.platform === 'feishu' ? 'join_feishu' : 'join_discord',
-              });
-              setOpen(false);
-            }}
-          >
-            <span className="entry-settings-menu__item-icon" aria-hidden>
-              {community.platform === 'feishu'
-                ? <FeishuIcon monochrome width={14} height={14} />
-                : <Icon name="discord" size={14} />}
-            </span>
-            <span>{t('entry.communityLabel')}</span>
-            {discordOnlineLabel ? (
-              <span className="entry-settings-menu__item-meta">
-                {discordOnlineLabel}
-              </span>
-            ) : null}
-            <Icon name="external-link" size={14} className="entry-settings-menu__item-end" />
           </a>
           <a
             className="entry-settings-menu__item"

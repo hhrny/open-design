@@ -38,7 +38,6 @@ import {
   renderDeckFrameworkDirective,
   type DeckFrameworkMode,
 } from './deck-framework.js';
-import { MEDIA_GENERATION_CONTRACT } from './media-contract.js';
 import {
   composeOdNextStrategyRequestPromptV2,
   type OdNextStrategyRequestRecipeV2,
@@ -579,10 +578,6 @@ export function composeSystemPrompt({
     );
   }
 
-  if (!isAskMode && isMediaSurfaceEarly) {
-    parts.push(MEDIA_GENERATION_CONTRACT);
-  }
-
   if (!isAskMode && !isWebCloneRun && activeDesignSystemBody && activeDesignSystemBody.length > 0) {
     parts.push(ACTIVE_DESIGN_SYSTEM_VISUAL_DIRECTION_OVERRIDE);
   }
@@ -636,7 +631,7 @@ If the rules below tell you to plan with TodoWrite, write the plan as prose inst
 // behave the same.
 const CHAT_MODE_OVERRIDE = `# Ask mode — bare conversation (this is the whole charter for this turn)
 
-This conversation is in OpenDesign Ask mode: a fast, low-overhead chat kept deliberately light to save tokens. OpenDesign is the open-source Claude Design alternative and a native Figma counterpart. Official links: GitHub https://github.com/nexu-io/open-design, website https://open-design.ai/, Discord https://discord.gg/mHAjSMV6gz.
+This conversation is in Ask mode: a fast, low-overhead chat kept deliberately light to save tokens. Answer the user's request directly using only the supplied working-directory and selected-file context.
 
 Behave like a direct, multi-turn desktop chat assistant. Prefer concise prose: answer the question, explain, compare options, debug prompts, and review existing work. You still have the user's project files, attachments, connectors, MCP servers, project memory, any active design system, and any skills they attached for this turn — use them as context, and follow an attached skill's workflow when one is present.
 
@@ -830,126 +825,20 @@ function kindDetailLines(
   return out;
 }
 
-function imageLines(
-  metadata: ProjectMetadata,
-): string[] {
-  const out: string[] = [];
-  if (metadata.kind === 'image') {
-    out.push(
-      `- **imageModel**: ${metadata.imageModel ?? '(not provided)'}`,
-    );
-    out.push(
-      `- **aspectRatio**: ${metadata.imageAspect ?? '(not provided; common choices include 1:1, 16:9, 9:16, 4:3, or 3:4)'}`,
-    );
-    if (metadata.imageStyle) {
-      out.push(`- **styleNotes**: ${metadata.imageStyle}`);
-    }
-    if (metadata.promptTemplate && metadata.promptTemplate.prompt.trim().length > 0) {
-      out.push(`- **referenceTemplate**: ${metadata.promptTemplate.title}`);
-    }
-    out.push('');
-    out.push(
-      'This is an **image** project. Plan the prompt carefully, then dispatch via the **media generation contract** using `"$OD_NODE_BIN" "$OD_BIN" media generate --surface image --model <imageModel>`. Do NOT emit `<artifact>` HTML for media surfaces.',
-    );
-    if (metadata.imageModel?.startsWith('vela/')) {
-      out.push(
-        'This OpenDesign Cloud `vela/*` model must go through the OD media dispatcher. Do not invoke the `vela` CLI or the remote media API directly; the daemon owns Workspace attribution, downloads, and final project-file placement.',
-      );
-    }
-  }
-  return out;
+function imageLines(_metadata: ProjectMetadata): string[] {
+  return [];
 }
 
-function videoLines(
-  metadata: ProjectMetadata,
-): string[] {
-  const out: string[] = [];
-  if (metadata.kind === 'video') {
-    out.push(
-      `- **videoModel**: ${metadata.videoModel ?? '(not provided)'}`,
-    );
-    out.push(
-      `- **lengthSeconds**: ${typeof metadata.videoLength === 'number' ? metadata.videoLength : '(not provided; common choices include 3s, 5s, or 10s)'}`,
-    );
-    out.push(
-      `- **aspectRatio**: ${metadata.videoAspect ?? '(not provided; common choices include 16:9, 9:16, or 1:1)'}`,
-    );
-    if (metadata.promptTemplate && metadata.promptTemplate.prompt.trim().length > 0) {
-      out.push(`- **referenceTemplate**: ${metadata.promptTemplate.title}`);
-    }
-    out.push('');
-    out.push(
-      'This is a **video** project. Plan the shotlist and motion, then dispatch via the **media generation contract** using `"$OD_NODE_BIN" "$OD_BIN" media generate --surface video --model <videoModel> --length <seconds> --aspect <ratio>`. Do NOT emit `<artifact>` HTML.',
-    );
-    if (metadata.videoModel?.startsWith('vela/')) {
-      out.push(
-        'This OpenDesign Cloud `vela/*` model must go through the OD media dispatcher. Do not invoke the `vela` CLI or the remote media API directly; the daemon owns Workspace attribution, polling, downloads, and final project-file placement.',
-      );
-    }
-    if (metadata.videoModel === 'hyperframes-html') {
-      out.push(
-        'Special case: `hyperframes-html` is a local HTML-to-MP4 renderer, not a photoreal text-to-video model. Treat it like a motion design renderer, ask at most one clarifying question, then dispatch immediately.',
-      );
-    }
-  }
-  return out;
+function videoLines(_metadata: ProjectMetadata): string[] {
+  return [];
 }
 
 function audioLines(
-  metadata: ProjectMetadata,
-  audioVoiceOptions: AudioVoiceOption[] | undefined,
-  audioVoiceOptionsError: string | undefined,
+  _metadata: ProjectMetadata,
+  _audioVoiceOptions: AudioVoiceOption[] | undefined,
+  _audioVoiceOptionsError: string | undefined,
 ): string[] {
-  const out: string[] = [];
-  if (metadata.kind === 'audio') {
-    out.push(
-      `- **audioKind**: ${metadata.audioKind ?? '(not provided; common choices include music, speech, or sfx)'}`,
-    );
-    out.push(
-      `- **audioModel**: ${metadata.audioModel ?? '(not provided)'}`,
-    );
-    out.push(
-      `- **durationSeconds**: ${typeof metadata.audioDuration === 'number' ? metadata.audioDuration : '(not provided)'}`,
-    );
-    if (metadata.voice) {
-      out.push(`- **voice**: ${metadata.voice}`);
-    } else if (metadata.audioKind === 'speech') {
-      out.push('- **voice**: (not provided; relevant dimensions include voice id, accent, and pacing)');
-    }
-    const voiceOptions = shouldRenderElevenLabsVoiceOptions(metadata, audioVoiceOptions)
-      ? audioVoiceOptions ?? []
-      : [];
-    if (voiceOptions.length > 0) {
-      out.push(
-        '- **ElevenLabs voice selection policy**: First infer from the current request, conversation, Plugin inputs, and available context. If the provider default can safely satisfy the brief, omit `--voice` and do not ask. Only when voice selection would materially change the requested result and no safe default can be inferred, emit the dropdown template below. Its visible labels are voice descriptions; the selected value must be the exact `voice_id` passed to `--voice`. Do not ask the user to type an id.',
-      );
-      if (voiceOptions.length > ELEVENLABS_VOICE_PROMPT_OPTION_LIMIT) {
-        out.push(`- **ElevenLabs voice options**: showing the first ${ELEVENLABS_VOICE_PROMPT_OPTION_LIMIT} of ${voiceOptions.length} available voices.`);
-      }
-      out.push('');
-      out.push('Conditional template — do not emit unless the voice-selection policy above requires clarification:');
-      out.push('<question-form id="elevenlabs-voice" title="Choose an ElevenLabs voice">');
-      out.push(JSON.stringify(renderElevenLabsVoiceQuestionForm(voiceOptions), null, 2));
-      out.push('</question-form>');
-    } else {
-      const audioVoiceOptionsPromptError = formatElevenLabsVoiceOptionsErrorForPrompt(audioVoiceOptionsError);
-      if (audioVoiceOptionsPromptError) {
-        out.push(
-          `- **ElevenLabs voice options**: ${audioVoiceOptionsPromptError}`,
-        );
-      }
-    }
-    if (metadata.audioKind === 'sfx') {
-      out.push(
-        '- **SFX discovery**: If the audible event cannot be inferred and a missing detail would materially change the result, clarify only the highest-impact unresolved dimensions. Relevant dimensions include sound source/action, materials, intensity, acoustic space, timing/tail, loop/non-loop, and "avoid" constraints. Do not ask for language or voice for SFX.',
-      );
-    }
-    out.push('');
-    out.push(
-      'This is an **audio** project. Lock the content intent first, then dispatch via the **media generation contract** using `"$OD_NODE_BIN" "$OD_BIN" media generate --surface audio --audio-kind <kind> --model <audioModel> --duration <seconds>` and add `--voice <voice-id>` for speech when you have a provider-specific voice id. Do NOT emit `<artifact>` HTML.',
-    );
-  }
-  return out;
+  return [];
 }
 
 function inspirationLines(

@@ -33,117 +33,17 @@ od:
 
 HTML is the source of truth for video. A composition is an HTML file with `data-*` attributes for timing, a GSAP timeline for animation, and CSS for appearance. The framework handles clip visibility, media playback, and timeline sync.
 
-## OpenDesign integration (load-bearing for this surface)
+## Composition workflow
 
-When this skill runs inside OpenDesign (i.e. `$OD_PROJECT_DIR` is set), the
-output flow is fixed: only the rendered `.mp4` should land in the project
-root. Composition source files (`hyperframes.json`, `meta.json`,
-`index.html`, assets) belong inside a hidden cache directory so they don't
-clutter the user's FileViewer or the chat's "produced files" chips.
+Keep the editable composition source in the current working directory. Author
+the HTML, CSS, assets and seekable timeline directly, using semantic filenames
+and stable element identifiers.
 
-**Render workflow inside OD — fast path**:
-
-For most OD requests ("test video", "5s product reveal", "demo clip"),
-do NOT write the composition HTML from scratch. Use Open Design's
-deterministic scaffold and edit only what the prompt actually changes. The
-"author from scratch" path costs minutes of model output and silent
-chat-tool time; the scaffold path costs seconds.
-
-```bash
-# 1. Pick a hidden cache slot. Dotfile prefix → OD's project file
-#    listing skips it, so the source files never clutter the chat.
-COMP_REL=".hyperframes-cache/$(date +%s)-$(openssl rand -hex 2)"
-COMP="$OD_PROJECT_DIR/$COMP_REL"
-
-# 2. Get an immediately-renderable scaffold (hyperframes.json,
-#    meta.json, index.html with GSAP CDN + window.__timelines.main
-#    already registered). Open Design writes these files itself; it does
-#    not run `hyperframes init`, consult an npx cache, or install global skills.
-"$OD_NODE_BIN" "$OD_BIN" media scaffold \
-  --project "$OD_PROJECT_ID" \
-  --composition-dir "$COMP_REL"
-
-# 3. Edit ONLY $COMP/index.html — change `data-duration` on the root
-#    if you need a non-default length, swap the placeholder palette
-#    in <style>, add 1–3 clip <div>s for text/imagery, and append the
-#    matching GSAP tweens inside the existing
-#    `window.__timelines["main"] = gsap.timeline({paused:true})` block.
-#    Keep edits minimal; the scaffold is already valid HF.
-
-# 4. Dispatch render through the OD daemon. Do NOT run HyperFrames
-#    `render` from this shell — the daemon runs it for you in an
-#    unsandboxed process. (Many agent CLIs, Claude Code in particular,
-#    wrap Bash in macOS sandbox-exec under which puppeteer's Chrome
-#    subprocess hangs partway through frame capture. The daemon process
-#    is unsandboxed, so renders complete reliably.)
-#
-#    The dispatcher returns within ~1s with a {taskId}; drive the
-#    render to completion by looping `"$OD_NODE_BIN" "$OD_BIN" media wait <taskId>` calls.
-#    Each call long-polls up to 25s (well under your shell tool's
-#    default 30s cap) and exits 0/2/5 to signal done/running/failed.
-out=$("$OD_NODE_BIN" "$OD_BIN" media generate \
-  --project "$OD_PROJECT_ID" \
-  --surface video \
-  --model hyperframes-html \
-  --output "<descriptive-name>.mp4" \
-  --composition-dir "$COMP_REL")
-ec=$?
-task_id=$(printf '%s\n' "$out" | tail -1 | jq -r '.taskId // empty')
-since=$(printf '%s\n' "$out" | tail -1 | jq -r '.nextSince // 0')
-while [ "$ec" -eq 2 ] && [ -n "$task_id" ]; do
-  out=$("$OD_NODE_BIN" "$OD_BIN" media wait "$task_id" --since "$since")
-  ec=$?
-  since=$(printf '%s\n' "$out" | tail -1 | jq -r '.nextSince // '"$since")
-done
-[ "$ec" -ne 0 ] && { echo "$out" >&2; exit "$ec"; }
-```
-
-Each `generate` and each `wait` call lasts at most ~25s, so the agent
-shell tool's default ~30s cap never fires. Progress lines from HF
-(`Capturing frame N/M`) stream to stderr live throughout the loop.
-When the render finishes, the last stdout line is
-`{"file": { "name": "<output>", "size": …, "kind": "video", … }}` —
-quote `file.name` in your reply so the user knows what was produced.
-
-**Skip the Visual Identity Gate inside OD.** The HARD-GATE section
-below (under "Approach") tells you to read DESIGN.md / visual-style.md
-or stop and ask 3 mood questions before writing any composition. That
-gate is for standalone HF projects. **OD projects already have their
-own design-system layer** — the user picked their visual direction at
-project creation time. For an OD test render, default to: dark canvas
-(#0b0b0f), one warm accent (#ffb76b), one cool accent (#7da4ff),
-restrained motion. Only ask for stylistic input if the user's prompt
-is too vague to even pick a subject (very rare).
-
-When to skip the scaffold and write from scratch: only when the user
-explicitly asks for something the blank template clearly can't host
-(e.g. multi-composition timelines, audio-reactive overlays, captions
-synced to a TTS track they've already generated). For everything else,
-init + edit is the default path.
-
-The lighter HF subcommands you CAN still run from your own shell
-(they don't need to spawn Chrome):
-
-- `"$OD_NODE_BIN" "$OD_HYPERFRAMES_BIN" lint "$COMP"` — validate composition before dispatch
-- `"$OD_NODE_BIN" "$OD_HYPERFRAMES_BIN" transcribe <audio>` — generate captions
-- `"$OD_NODE_BIN" "$OD_HYPERFRAMES_BIN" tts <text>` — generate narration
-
-Reserve the daemon dispatch for `render`/`inspect`/`preview` (anything
-Chrome-bound). After authoring the composition under `.hyperframes-cache/`,
-render it by calling `"$OD_NODE_BIN" "$OD_BIN" media generate --surface video --model hyperframes-html --composition-dir <rel>`.
-The daemon runs the Chrome-bound HyperFrames render outside your shell
-sandbox and streams progress back to you. Do not run HyperFrames `render`
-yourself.
-
-**Do NOT** drop `hyperframes.json` / `meta.json` / `index.html` in the
-project root; OD's file listing scans recursively and the user would see
-three unrelated files appear in the chat.
-
-For CLI options beyond `render` (lint, preview, transcribe, tts, inspect,
-benchmark) call them directly from your shell tool when the task warrants
-it (e.g., generate TTS audio into the cache before referencing it from
-the composition).
-
+No media provider, model, credential, task dispatcher or renderer is assumed.
+If the selected runtime explicitly exposes a rendering capability, use it and
+verify the resulting file. Otherwise deliver the runnable editable composition
+and state plainly that no renderer is configured. Never invent a generated
+file, task ID, provider-specific command or download link.
 ## Approach
 
 Before writing HTML, think at a high level:
@@ -413,8 +313,8 @@ When no `visual-style.md` or animation direction is provided, follow [house-styl
 
 ## Output Checklist
 
-- [ ] `"$OD_NODE_BIN" "$OD_HYPERFRAMES_BIN" lint` and `"$OD_NODE_BIN" "$OD_HYPERFRAMES_BIN" validate` both pass
-- [ ] `"$OD_NODE_BIN" "$OD_HYPERFRAMES_BIN" inspect` passes, or every reported overflow is intentionally marked
+- [ ] Run the linter and validator when the selected runtime exposes them
+- [ ] Run visual inspection when available, or manually review every overflow
 - [ ] Contrast warnings addressed (see Quality Checks below)
 - [ ] Layout issues addressed (see Quality Checks below)
 - [ ] Animation choreography verified (see Quality Checks below)
@@ -423,12 +323,9 @@ When no `visual-style.md` or animation direction is provided, follow [house-styl
 
 ### Visual Inspect
 
-`hyperframes inspect` runs the composition in headless Chrome, seeks through the timeline, and maps visual layout issues with timestamps, selectors, bounding boxes, and fix hints. Run it after `lint` and `validate`:
-
-```bash
-"$OD_NODE_BIN" "$OD_HYPERFRAMES_BIN" inspect
-"$OD_NODE_BIN" "$OD_HYPERFRAMES_BIN" inspect --json
-```
+When the selected runtime exposes visual inspection, use it after linting and
+validation. It should seek through the timeline and report layout issues with
+timestamps, selectors, bounding boxes and fix hints.
 
 Failures usually mean text is spilling out of a bubble/card, a fixed-size label is clipping dynamic copy, or text has moved off the canvas. Fix by increasing container size or padding, reducing font size or letter spacing, adding a real `max-width` so text wraps inside the container, or using `window.__hyperframes.fitTextFontSize(...)` for dynamic copy.
 

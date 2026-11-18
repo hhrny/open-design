@@ -47,9 +47,7 @@ const RESUME_CONTINUE_PROMPT =
 //
 // `od` is two CLIs glued together:
 //   - default mode: starts the daemon + opens the web UI.
-//   - `od media …`: a thin client that POSTs to the running daemon. This
-//     is what the code agent invokes from inside a chat to actually
-//     produce image / video / audio bytes (the unifying contract).
+// Product subcommands are dispatched to their domain handlers below.
 //
 // We dispatch on the first positional argument so flags like --port keep
 // working unchanged. Subcommand routing is keyword-based; flags are
@@ -407,7 +405,6 @@ const PLUGIN_LIST_BOOLEAN_FLAGS = new Set([
 const SUBCOMMAND_MAP = {
   agent: runAgent,
   artifacts: runArtifacts,
-  media: runMedia,
   mcp: runMcp,
   collab: runCollab,
   'message-center': runMessageCenter,
@@ -1187,8 +1184,6 @@ function printRootHelp() {
       Discover, install, and apply plugins through the local daemon.
   od plugin publish-repo <folder>
       Create/update the author's GitHub repo for a local plugin folder.
-  od plugin open-design-pr <folder>
-      Push a community-catalog branch and open the OpenDesign PR form.
 
   od automation <list|get|create|update|run|runs|pause|resume|delete> [args]
       Drive the Automations surface headlessly. Same store as the UI's
@@ -1236,27 +1231,6 @@ function printRootHelp() {
   "$OD_NODE_BIN" "$OD_BIN" tools ...
       Recommended agent-runtime form; avoids relying on user PATH for od or node.
 
-  od media generate --surface <image|video|audio> --model <id> [opts]
-      Generate a media artifact and write it into the active project.
-      Designed to be invoked by a code agent - picks up OD_DAEMON_URL
-      and OD_PROJECT_ID from the env that the daemon injected on spawn.
-
-  od media scaffold --composition-dir .hyperframes-cache/<id>
-      Create a deterministic HyperFrames composition without npx or global
-      skill installation, before dispatching it through media generate.
-
-  od media reference --source <file|link>
-      Measure a reference video (shot cuts, frames, contact sheet) before
-      replicating it as a Motion film.
-
-  od media compare --reference <video> --candidate <film>
-      Put the produced film beside the reference at the same timestamps and
-      score how far apart the frames are, so a check reads real evidence.
-
-  od media stock-search --slots '<json>'
-      Download licensed Pexels / Pixabay photos for several image slots in one
-      call (company service uses your existing Vela login).
-
   od mcp [--daemon-url <url>]
       Run a stdio MCP server that proxies project tool calls to a
       running OpenDesign daemon. Wire it into a coding agent
@@ -1275,8 +1249,7 @@ What the daemon does:
   * scans PATH for installed code-agent CLIs (claude, codex, devin, opencode, cursor-agent, ...)
   * serves the chat UI at http://<host>:<port>
   * proxies messages (text + images) to the selected agent via child-process spawn
-  * exposes project-scoped media scaffold/generate APIs — the unified path
-     that the agent calls via \`od media scaffold\` and \`od media generate\`.`);
+  * exposes project-scoped artifact, chat, plugin, and integration APIs.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -3123,7 +3096,10 @@ async function runPlugin(args) {
     case 'export':   return runPluginExport(rest);
     case 'publish':  return runPluginPublish(rest);
     case 'publish-repo': return runPluginPublishRepo(rest);
-    case 'open-design-pr': return runPluginOpenDesignPr(rest);
+    case 'open-design-pr':
+      console.error('The Open Design community catalog has been removed.');
+      process.exitCode = 2;
+      return;
     case 'yank':     return runPluginYank(rest);
     default:
       console.error(`unknown subcommand: od plugin ${sub}`);
@@ -6528,8 +6504,6 @@ function printPluginHelp() {
                                           List persisted skill-to-plugin candidates.
   od plugin publish-repo <folder>         Create/update the author's public
                                           GitHub repo for a plugin folder.
-  od plugin open-design-pr <folder>       Push a community-catalog branch and
-                                          open the nexu-io/open-design PR form.
   od plugin publish <folder> --to open-design|anthropics-skills|awesome-agent-skills|clawhub|skills-sh
                                           Prepare a registry submission link.
   od plugin login [--host github.com]      Authenticate registry publishing via gh.

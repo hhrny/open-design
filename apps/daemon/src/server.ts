@@ -3325,6 +3325,17 @@ export async function startServer({
     ) {
       return sendApiError(res, 404, 'FEATURE_REMOVED', 'Account login has been removed.');
     }
+    if (/^\/community(?:\/|$)/.test(req.path)) {
+      return sendApiError(res, 404, 'FEATURE_REMOVED', 'Community has been removed.');
+    }
+    if (/(^|\/)media(?:\/|$)/.test(req.path)) {
+      return sendApiError(
+        res,
+        404,
+        'FEATURE_REMOVED',
+        'Media generation providers have been removed.',
+      );
+    }
     return next();
   });
   const projectPreviewScopes = createProjectPreviewScopeRegistry();

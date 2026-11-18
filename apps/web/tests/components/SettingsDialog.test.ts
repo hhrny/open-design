@@ -1097,9 +1097,6 @@ describe('SettingsDialog Orbit run behavior', () => {
       const body = typeof init?.body === 'string' ? init.body : undefined;
       calls.push({ url, method, body });
 
-      if (url === '/api/media/config') {
-        return new Response(null, { status: 204 });
-      }
       if (url === '/api/app-config') {
         return new Response(null, { status: 204 });
       }
@@ -1125,15 +1122,13 @@ describe('SettingsDialog Orbit run behavior', () => {
     ).resolves.toEqual({ projectId: 'orbit-project', agentRunId: 'run-3' });
 
     expect(calls.map((call) => call.url)).toEqual([
-      '/api/media/config',
       '/api/app-config',
       '/api/orbit/run',
     ]);
-    expect(JSON.parse(calls[0]!.body ?? '{}')).toMatchObject({ force: false });
-    expect(JSON.parse(calls[2]!.body ?? '{}')).toEqual({ locale: null });
+    expect(JSON.parse(calls[1]!.body ?? '{}')).toEqual({ locale: null });
   });
 
-  it('does not force an explicit empty media provider map before starting a manual Orbit run', async () => {
+  it('ignores a legacy empty media provider map before starting a manual Orbit run', async () => {
     const calls: Array<{ url: string; method: string; body?: string }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -1141,9 +1136,6 @@ describe('SettingsDialog Orbit run behavior', () => {
       const body = typeof init?.body === 'string' ? init.body : undefined;
       calls.push({ url, method, body });
 
-      if (url === '/api/media/config') {
-        return new Response(null, { status: 204 });
-      }
       if (url === '/api/app-config') {
         return new Response(null, { status: 204 });
       }
@@ -1165,15 +1157,12 @@ describe('SettingsDialog Orbit run behavior', () => {
       }),
     ).resolves.toEqual({ projectId: 'orbit-project', agentRunId: 'run-4' });
 
-    expect(calls.map((call) => call.url)).toEqual(['/api/media/config', '/api/app-config', '/api/orbit/run']);
-    expect(JSON.parse(calls[0]!.body ?? '{}')).toMatchObject({
-      providers: {},
-      force: false,
-    });
-    expect(JSON.parse(calls[2]!.body ?? '{}')).toEqual({ locale: null });
+    expect(calls.map((call) => call.url)).toEqual(['/api/app-config', '/api/orbit/run']);
+    expect(JSON.parse(calls[0]!.body ?? '{}')).not.toHaveProperty('mediaProviders');
+    expect(JSON.parse(calls[1]!.body ?? '{}')).toEqual({ locale: null });
   });
 
-  it('preserves masked daemon media keys before starting a manual Orbit run', async () => {
+  it('drops legacy masked media keys before starting a manual Orbit run', async () => {
     const calls: Array<{ url: string; method: string; body?: string }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -1181,9 +1170,6 @@ describe('SettingsDialog Orbit run behavior', () => {
       const body = typeof init?.body === 'string' ? init.body : undefined;
       calls.push({ url, method, body });
 
-      if (url === '/api/media/config') {
-        return new Response(null, { status: 204 });
-      }
       if (url === '/api/app-config') {
         return new Response(null, { status: 204 });
       }
@@ -1194,8 +1180,7 @@ describe('SettingsDialog Orbit run behavior', () => {
     }) as typeof fetch;
 
     await expect(
-      persistConfigAndRunOrbit(
-        {
+      persistConfigAndRunOrbit({
           ...baseConfig,
           mediaProviders: {
             openai: {
@@ -1205,29 +1190,11 @@ describe('SettingsDialog Orbit run behavior', () => {
               baseUrl: 'https://custom.example/v1',
             },
           },
-        },
-        {
-          daemonProviders: {
-            openai: {
-              apiKey: '',
-              apiKeyConfigured: true,
-              apiKeyTail: '1234',
-              baseUrl: '',
-            },
-          },
-        },
-      ),
+      }),
     ).resolves.toEqual({ projectId: 'orbit-project', agentRunId: 'run-preserve' });
 
-    expect(JSON.parse(calls[0]!.body ?? '{}')).toMatchObject({
-      providers: {
-        openai: {
-          preserveApiKey: true,
-          baseUrl: 'https://custom.example/v1',
-        },
-      },
-      force: false,
-    });
+    expect(calls.map((call) => call.url)).toEqual(['/api/app-config', '/api/orbit/run']);
+    expect(JSON.parse(calls[0]!.body ?? '{}')).not.toHaveProperty('mediaProviders');
   });
 
   it('does not start a manual Orbit run when saving app config fails', async () => {
@@ -1251,14 +1218,11 @@ describe('SettingsDialog Orbit run behavior', () => {
     expect(calls).toEqual(['/api/app-config']);
   });
 
-  it('still starts a manual Orbit run when saving media credentials fails', async () => {
+  it('does not call the removed media endpoint before starting a manual Orbit run', async () => {
     const calls: Array<{ url: string; method: string }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
       calls.push({ url, method: init?.method ?? 'GET' });
-      if (url === '/api/media/config') {
-        return new Response(null, { status: 500 });
-      }
       if (url === '/api/app-config') {
         return new Response(null, { status: 204 });
       }
@@ -1278,7 +1242,6 @@ describe('SettingsDialog Orbit run behavior', () => {
     ).resolves.toEqual({ projectId: 'orbit-project', agentRunId: 'run-media-failed' });
 
     expect(calls).toEqual([
-      { url: '/api/media/config', method: 'PUT' },
       { url: '/api/app-config', method: 'PUT' },
       { url: '/api/orbit/run', method: 'POST' },
     ]);

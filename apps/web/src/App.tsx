@@ -161,12 +161,7 @@ import {
 } from './collab/useProjectRouteWorkspaceContext';
 import { resolvePlanTier } from './collab/team-plan';
 import { deriveTabIdentityScope, UNSET_ACCOUNT_BUCKET } from './collab/tab-scope';
-import { CommunityView } from './components/CommunityView';
 import { seedHomeComposerPrompt } from './components/HomeView';
-import {
-  createPluginUseHandoff,
-  stashHomePromptHandoff,
-} from './components/home-hero/plugin-authoring';
 import { goBack, navigate, useRoute, type Route } from './router';
 import { navigationTiming, navigationPage, usePageNavigationReady, observeNavigation } from './observability/navigation-timing';
 import { useStartupReady } from './observability/startup-ready';
@@ -175,23 +170,17 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_NOTIFICATIONS,
   DEFAULT_PET,
-  fetchMediaProvidersFromDaemon,
-  hasAnyConfiguredProvider,
   fetchComposioConfigFromDaemon,
   loadConfig,
   mergeDaemonConfig,
-  mergeDaemonMediaProviders,
   saveConfig,
-  shouldSyncLocalMediaProvidersToDaemon,
   syncComposioConfigToDaemon,
   syncConfigToDaemon,
-  syncMediaProvidersToDaemon,
 } from './state/config';
 import { createSilentUpdatePreferenceWriter } from './state/silent-update-preference';
 import { applyAppearanceToDocument } from './state/appearance';
 import { isMacPlatform } from './utils/platform';
 import { randomUUID } from './utils/uuid';
-import { summarizeProjectNameFromPrompt } from './utils/projectName';
 import { armCompletionFeedbackOnFirstGesture } from './utils/notifications';
 import { useGlobalRunNotices } from './hooks/useGlobalRunNotices';
 import {
@@ -376,7 +365,6 @@ export function shouldRouteToFirstRunOnboarding(
   if (
     pathname.startsWith('/projects/')
     || pathname.startsWith('/collab-demo')
-    || pathname.startsWith('/community')
   ) {
     return false;
   }
@@ -395,10 +383,10 @@ function workspaceProjectListViewForRoute(route: Route): WorkspaceProjectListVie
 }
 
 export function shouldSyncMediaProvidersOnSave(
-  mediaProviders: AppConfig['mediaProviders'],
-  options?: { force?: boolean },
+  _mediaProviders: AppConfig['mediaProviders'],
+  _options?: { force?: boolean },
 ): boolean {
-  return Boolean(options?.force) || hasAnyConfiguredProvider(mediaProviders);
+  return false;
 }
 
 function normalizeSavedComposioConfig(config: AppConfig['composio']): AppConfig['composio'] {
@@ -1518,13 +1506,6 @@ function AppInner() {
   );
 
 
-  const [daemonMediaProviders, setDaemonMediaProviders] = useState<
-    AppConfig['mediaProviders'] | null
-  >(null);
-  const [daemonMediaProvidersFetchState, setDaemonMediaProvidersFetchState] = useState<
-    'idle' | 'ok' | 'error'
-  >('idle');
-  const [mediaProvidersNotice, setMediaProvidersNotice] = useState<string | null>(null);
   // Per-resource loading flags. Each goes false the moment its own fetch
   // resolves so each entry-view tab can render as its data lands instead of
   // every tab waiting on the slowest endpoint (typically `/api/agents`,
@@ -2553,46 +2534,22 @@ function AppInner() {
         setAppVersionInfo(info);
       });
 
-      // Daemon-persisted config + composio config + media provider config land
-      // together so the welcome-modal decision and daemon-backed settings
-      // apply in one merge, avoiding a flash where local-only state is shown
-      // before daemon overrides it.
+      // Daemon-persisted config and Composio config land together so the
+      // welcome-modal decision and daemon-backed settings apply in one merge.
       void Promise.all([
         fetchDaemonConfig(),
         fetchComposioConfigFromDaemon(),
-        fetchMediaProvidersFromDaemon(),
-      ]).then(async ([
-        daemonConfig,
-        daemonComposioConfig,
-        daemonMediaProvidersResult,
-      ]) => {
+      ]).then(async ([daemonConfig, daemonComposioConfig]) => {
         if (cancelled) return;
-        const daemonMediaProvidersLoaded =
-          daemonMediaProvidersResult.status === 'ok'
-            ? daemonMediaProvidersResult.providers
-            : null;
-        setDaemonMediaProviders(daemonMediaProvidersLoaded);
-        setDaemonMediaProvidersFetchState(daemonMediaProvidersResult.status);
-        setMediaProvidersNotice(
-          daemonMediaProvidersResult.status === 'error'
-            ? t('settings.mediaProviderLoadError')
-            : null,
-        );
         // Settings remain interactive while daemon hydration is in flight.
         // Rebase the daemon response on the latest persisted state so a
         // completed user write cannot be overwritten by the boot snapshot.
         const baseConfig = latestPersistedConfigRef.current;
-        const migratedLocalMediaProviders = shouldSyncLocalMediaProvidersToDaemon(
-          baseConfig.mediaProviders,
-          daemonMediaProvidersLoaded,
+        const next = clearStaleAmrModelChoiceOnProfileChange(
+          baseConfig,
+          mergeDaemonConfig(baseConfig, daemonConfig),
         );
-        const next = mergeDaemonMediaProviders(
-          clearStaleAmrModelChoiceOnProfileChange(
-            baseConfig,
-            mergeDaemonConfig(baseConfig, daemonConfig),
-          ),
-          daemonMediaProvidersLoaded,
-        );
+        next.mediaProviders = {};
         const hasLocalComposioKey = Boolean(next.composio?.apiKey?.trim());
         if (!hasLocalComposioKey && daemonComposioConfig) {
           next.composio = daemonComposioConfig;
@@ -2616,15 +2573,6 @@ function AppInner() {
           }
         }
         saveConfig(next);
-        if (
-          daemonMediaProvidersResult.status === 'ok'
-          && migratedLocalMediaProviders
-          && hasAnyConfiguredProvider(next.mediaProviders)
-        ) {
-          void syncMediaProvidersToDaemon(next.mediaProviders, {
-            daemonProviders: daemonMediaProvidersLoaded,
-          });
-        }
         // Migrate localStorage prefs to daemon on first boot with the new
         // endpoint. If daemon already had values the merge above used them;
         // writing back is idempotent and keeps both sides in sync.
@@ -2946,26 +2894,6 @@ function AppInner() {
     return ok;
   }, [refreshTemplates]);
 
-  const reloadMediaProvidersFromDaemon = useCallback(async () => {
-    const result = await fetchMediaProvidersFromDaemon();
-    if (result.status !== 'ok') {
-      setDaemonMediaProvidersFetchState('error');
-      setMediaProvidersNotice(
-        t('settings.mediaProviderLoadError'),
-      );
-      return null;
-    }
-    setDaemonMediaProviders(result.providers);
-    setDaemonMediaProvidersFetchState('ok');
-    setMediaProvidersNotice(null);
-    setConfig((prev) => {
-      const merged = mergeDaemonMediaProviders(prev, result.providers);
-      saveConfig(merged);
-      return merged;
-    });
-    return result.providers;
-  }, []);
-
   /**
    * Non-optimistic, serialized write for the daemon-owned silent-update
    * preference. Concurrent Settings / popup toggles cannot commit out of
@@ -3020,28 +2948,17 @@ function AppInner() {
     const nextForOptimistic = silentChanged
       ? { ...next, allowSilentUpdates: prevSilent }
       : next;
-    const persisted = buildPersistedConfig(nextForOptimistic, configRef.current);
+    const persisted = buildPersistedConfig(
+      { ...nextForOptimistic, mediaProviders: {} },
+      configRef.current,
+    );
     latestPersistedConfigRef.current = persisted;
     saveConfig(persisted);
     setConfig(persisted);
-    const shouldSyncMediaProviders =
-      daemonMediaProvidersFetchState === 'ok'
-      && shouldSyncMediaProvidersOnSave(persisted.mediaProviders, {
-        force: options?.forceMediaProviderSync,
-      });
     const daemonPayload = silentChanged
       ? { ...persisted, allowSilentUpdates: nextSilent }
       : persisted;
-    await Promise.all([
-      shouldSyncMediaProviders
-        ? syncMediaProvidersToDaemon(persisted.mediaProviders, {
-            force: options?.forceMediaProviderSync,
-            daemonProviders: daemonMediaProviders,
-            throwOnError: options?.forceMediaProviderSync,
-          })
-        : Promise.resolve(),
-      syncConfigToDaemon(daemonPayload, { throwOnError: true }),
-    ]);
+    await syncConfigToDaemon(daemonPayload, { throwOnError: true });
     if (silentChanged) {
       latestPersistedConfigRef.current = {
         ...latestPersistedConfigRef.current,
@@ -3049,7 +2966,7 @@ function AppInner() {
       };
       setConfig((curr) => ({ ...curr, allowSilentUpdates: nextSilent }));
     }
-  }, [daemonMediaProviders, daemonMediaProvidersFetchState]);
+  }, []);
 
   const handleSettingsDraftChange = useCallback((draft: AppConfig) => {
     settingsDraftConfigRef.current = draft;
@@ -5655,10 +5572,6 @@ function AppInner() {
       onAmrSignedOut={handleActiveCloudSignOut}
       onRefreshAgents={refreshAgents}
       onAmrLoginStatusChange={handleAmrLoginStatusChange}
-      daemonMediaProviders={daemonMediaProviders}
-      daemonMediaProvidersFetchState={daemonMediaProvidersFetchState}
-      mediaProvidersNotice={mediaProvidersNotice}
-      onReloadMediaProviders={reloadMediaProvidersFromDaemon}
       onProjectsRefresh={refreshProjects}
       onSkillsChanged={handleSkillsChanged}
       onDesignSystemsChanged={handleDesignSystemsChanged}
@@ -5712,79 +5625,6 @@ function AppInner() {
     );
   } else if (route.kind === 'collab-demo') {
     appMain = <CollabDemoView projectId={route.projectId} />;
-  } else if (route.kind === 'community') {
-    appMain = (
-      <CommunityView
-        onRemixTemplate={({ templateId, prompt }) => {
-          // Remix carries the template's PROJECT along, not just its prompt:
-          // duplicate the plugin's example artifact into a fresh project,
-          // seed the composer with the template prompt, then open it on the
-          // copied entry file (keep in sync with the EntryShell-embedded
-          // community tab). Templates without a duplicable artifact fall
-          // back to the old prompt-only project.
-          void (async () => {
-            const name = summarizeProjectNameFromPrompt(prompt) || t('common.untitled');
-            try {
-              // One resolved authority for BOTH requests: the create binds the
-              // copied project to this workspace, and the seed patch is then
-              // authorized against that same binding. A headerless create is
-              // read by the daemon as a legacy caller and leaves the project
-              // bound to no workspace at all, which is what kept remixed
-              // projects out of the member's own 草稿 list.
-              const writeContext = resolvedWorkspaceContextForWrite(workspaceContextState);
-              const result = await duplicatePluginAsProject(templateId, { name }, writeContext);
-              const seeded = await patchProject(
-                result.projectId,
-                { pendingPrompt: prompt },
-                writeContext,
-              );
-              if (!seeded) {
-                // The project itself exists and is bound — only the prompt seed
-                // was refused. Keep the user on it (retrying through the catch
-                // below would leave the copy orphaned and create a second,
-                // empty project) and surface the dropped seed instead of
-                // discarding it silently.
-                console.error('Community remix: could not seed the template prompt.');
-              }
-              navigate({
-                kind: 'project',
-                projectId: result.projectId,
-                conversationId: result.conversationId,
-                fileName: result.relPath,
-              });
-            } catch {
-              await handleCreateProject({
-                name,
-                skillId: null,
-                designSystemId: null,
-                metadata: { kind: 'other', nameSource: 'prompt' },
-                pendingPrompt: prompt,
-              });
-            }
-          })();
-        }}
-        onUsePrompt={(target) => {
-          seedHomeComposerPrompt(target.prompt);
-          stashHomePromptHandoff(createPluginUseHandoff(Date.now(), target.templateId, {
-            action: 'use',
-            chipId: target.chipId,
-            projectKind: target.projectKind,
-          }));
-          navigate({ kind: 'home', view: 'home' });
-        }}
-        onUsePlugin={(record, action, target) => {
-          stashHomePromptHandoff(createPluginUseHandoff(Date.now(), record.id, {
-            action,
-            chipId: target.chipId,
-            projectKind: target.projectKind,
-            asExample: target.asExample,
-            // Community records its own use click.
-            useTracked: true,
-          }));
-          navigate({ kind: 'home', view: 'home' });
-        }}
-      />
-    );
   } else if (route.kind === 'home' && route.view === 'settings') {
     appMain = renderSettingsSurface('page');
   } else if (route.kind === 'project') {

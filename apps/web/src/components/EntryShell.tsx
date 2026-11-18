@@ -157,7 +157,6 @@ import {
   effectiveAgentModelId,
 } from './agentModelSelection';
 import { AgentIcon } from './AgentIcon';
-import { CommunityView } from './CommunityView';
 import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import {
   notifyTeamProjectsChanged,
@@ -2349,91 +2348,6 @@ export function EntryShell({
                 onPersistComposioKey={onPersistComposioKey}
                 onSkillsRefresh={onSkillsRefresh}
                 onSkillsChanged={onSkillsChanged}
-              />
-            ) : null}
-            {view === 'community' ? (
-              <CommunityView
-                onRemixTemplate={({ templateId, prompt }) => {
-                  // Remix carries the template's PROJECT along, not just its
-                  // prompt: duplicate the plugin's example artifact into a
-                  // fresh project (the same daemon flow as the plugin
-                  // gallery's 创建副本), seed the composer with the template
-                  // prompt for review, then open it on the copied entry file.
-                  // Templates without a duplicable artifact fall back to the
-                  // old prompt-only project.
-                  void (async () => {
-                    const name =
-                      summarizeProjectNameFromPrompt(prompt) || t('common.untitled');
-                    try {
-                      // One resolved authority for BOTH requests: the create
-                      // binds the copied project to this workspace, and the
-                      // seed patch is then authorized against that same
-                      // binding. A headerless create is read by the daemon as a
-                      // legacy caller and leaves the project bound to no
-                      // workspace at all, which is what kept remixed projects
-                      // out of the member's own 草稿 list.
-                      const writeContext =
-                        resolvedWorkspaceContextForWrite(workspaceContextState);
-                      const result = await duplicatePluginAsProject(
-                        templateId,
-                        { name },
-                        writeContext,
-                      );
-                      const seeded = await patchProject(
-                        result.projectId,
-                        { pendingPrompt: prompt },
-                        writeContext,
-                      );
-                      if (!seeded) {
-                        // The project itself exists and is bound — only the
-                        // prompt seed was refused. Keep the user on it
-                        // (retrying through the catch below would leave the
-                        // copy orphaned and create a second, empty project)
-                        // and surface the dropped seed instead of discarding
-                        // it silently.
-                        console.error('Community remix: could not seed the template prompt.');
-                      }
-                      await Promise.resolve(onOpenProject(result.projectId, result.relPath));
-                    } catch {
-                      await onCreateProject({
-                        name,
-                        skillId: null,
-                        designSystemId: null,
-                        metadata: { kind: 'other', nameSource: 'prompt' },
-                        pendingPrompt: prompt,
-                      });
-                    }
-                  })();
-                }}
-                onUsePrompt={(target) => {
-                  // Hands off to Home (OPEND-2793, product decision B): the
-                  // community view no longer docks a composer at its foot —
-                  // that bar had no relation to the gallery, the filters or
-                  // the card under it, and phase three will bring it back in
-                  // a template-bound shape. Same seed + binding pair the
-                  // standalone /community route in App.tsx uses, so Use
-                  // lands the prompt AND the plugin driver in Home's composer.
-                  seedHomeComposerPrompt(target.prompt);
-                  setHomePromptHandoff(createPluginUseHandoff(Date.now(), target.templateId, {
-                    action: 'use',
-                    chipId: target.chipId,
-                    projectKind: target.projectKind,
-                  }));
-                  changeView('home');
-                }}
-                // The gallery card's full details modal routes Use through the
-                // same Home hand-off the plugin library uses, so the plugin
-                // becomes the composer's active driver instead of only seeding
-                // prompt text.
-                onUsePlugin={(record, action, target) => {
-                  usePluginFromLibrary(record, action, {
-                    chipId: target.chipId,
-                    projectKind: target.projectKind,
-                    asExample: target.asExample,
-                    // Community records its own use click.
-                    useTracked: true,
-                  });
-                }}
               />
             ) : null}
             {/* Team destinations — the entry shell owns the nav frame only; each

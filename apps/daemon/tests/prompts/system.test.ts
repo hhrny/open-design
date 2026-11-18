@@ -252,7 +252,7 @@ describe('composeSystemPrompt', () => {
   // /system.ts exists for non-daemon contexts and was updated in the
   // hyperframes PR; without this test the two copies drift silently and the
   // main HyperFrames flow misses its preflight directive in production.
-  it('keeps the slim design charter out of media-surface prompts', () => {
+  it('keeps provider dispatch instructions out of media-surface prompts', () => {
     // Reviewer finding (#5603): with slim as the server default, the charter
     // head was composed before the media surface was known, so image/video/
     // audio runs carried the turn-1 discovery mandate and HTML handoff rules
@@ -270,7 +270,8 @@ describe('composeSystemPrompt', () => {
       // Nor the Ask-mode charter (fourth-round finding): CHAT_MODE_OVERRIDE
       // forbids creating media, contradicting the media contract below.
       expect(prompt).not.toContain('# Ask mode');
-      expect(prompt).toContain('media generate');
+      expect(prompt).not.toContain('media generate');
+      expect(prompt).not.toContain('## Media generation contract');
     }
     // Non-media slim runs keep the charter head.
     const design = composeSystemPrompt({ promptCoreVariant: 'slim' });
@@ -278,17 +279,17 @@ describe('composeSystemPrompt', () => {
     expect(design).toContain('## Requirements Clarification Phase');
   });
 
-  it('pins Cloud nano-banana shorthand and forbids reading generated media bytes back into context', () => {
+  it('does not inject Cloud model shorthand into image prompts', () => {
     const prompt = composeSystemPrompt({
       skillMode: 'image',
       metadata: { kind: 'image', imageModel: 'vela/nano-banana-2' } as any,
     });
 
-    expect(prompt).toContain('`nano-banana` and `nano-banana-2` mean');
-    expect(prompt).toContain('Do not call `Read` on the generated image');
+    expect(prompt).not.toContain('`nano-banana` and `nano-banana-2` mean');
+    expect(prompt).not.toContain('Do not call `Read` on the generated image');
   });
 
-  it('injects the html-in-canvas preflight for the hyperframes skill', () => {
+  it('does not inject media-host commands for the hyperframes skill', () => {
     const prompt = composeSystemPrompt({
       skillName: 'hyperframes',
       skillMode: 'video',
@@ -299,23 +300,19 @@ describe('composeSystemPrompt', () => {
       } as any,
     });
 
-    expect(prompt).toContain('## Active skill — hyperframes');
-    expect(prompt).toContain('**Pre-flight (do this before any other tool):**');
-    expect(prompt).toContain('`references/html-in-canvas.md`');
-    expect(prompt).toContain('`"$OD_NODE_BIN" "$OD_BIN" media scaffold`');
-    expect(prompt).toContain('media generate --surface video --model hyperframes-html --composition-dir <rel>');
-    expect(prompt).toContain('Do not run HyperFrames `render` yourself');
+    expect(prompt).not.toContain('`"$OD_NODE_BIN" "$OD_BIN" media scaffold`');
+    expect(prompt).not.toContain('media generate --surface video --model hyperframes-html --composition-dir <rel>');
     expect(prompt).not.toContain('npx hyperframes');
     expect(prompt).not.toContain('intentionally rejected for this model');
     expect(prompt).not.toContain('AGENT_RENDERED');
     expect(prompt).not.toContain('rendered by you directly via npx');
   });
 
-  it('keeps both hyperframes skill copies aligned with the daemon render handoff', () => {
+  it('keeps both hyperframes skill copies free of removed host media commands', () => {
     for (const markdown of [hyperframesSkillMarkdown, officialHyperframesSkillMarkdown]) {
-      expect(markdown).toContain('"$OD_NODE_BIN" "$OD_BIN" media scaffold');
-      expect(markdown).toContain('media generate --surface video --model hyperframes-html --composition-dir <rel>');
-      expect(markdown).toContain('Do not run HyperFrames `render`');
+      expect(markdown).not.toContain('"$OD_NODE_BIN" "$OD_BIN" media scaffold');
+      expect(markdown).not.toContain('media generate --surface video --model hyperframes-html --composition-dir <rel>');
+      expect(markdown).toContain('No media provider, model, credential, task dispatcher or renderer is assumed.');
       expect(markdown).not.toContain('npx hyperframes');
       expect(markdown).not.toContain('AGENT_RENDERED');
       expect(markdown).not.toContain('rendered by you directly via npx');
@@ -347,13 +344,13 @@ describe('composeSystemPrompt', () => {
     expect(prompt).toContain('the assistant message should only summarize the result');
   });
 
-  it('uses the primary skill surface when composed skill modes conflict', () => {
+  it('does not restore the media contract when composed skill modes conflict', () => {
     const prompt = composeSystemPrompt({
       skillMode: 'image',
       skillModes: ['deck', 'image'],
     });
 
-    expect(prompt).toContain('## Media generation contract');
+    expect(prompt).not.toContain('## Media generation contract');
     expect(prompt).not.toContain('# Slide deck — fixed framework');
   });
 
@@ -445,37 +442,36 @@ describe('composeSystemPrompt', () => {
       expect(prompt).toContain('Do not output generated source code in a `<artifact type="text/html">...</artifact>` block.');
     });
 
-    it('uses Vela media defaults only for AMR and forbids direct Vela calls', () => {
+    it('does not inject Vela or other provider defaults', () => {
       const amrPrompt = composeSystemPrompt({
         agentId: 'amr',
         metadata: { kind: 'image', imageModel: 'vela/gpt-image-2' } as any,
       });
-      expect(amrPrompt).toContain('Image model: `vela/gpt-image-2`');
+      expect(amrPrompt).not.toContain('Image model: `vela/gpt-image-2`');
       expect(amrPrompt).not.toContain(
         'Video model: `vela/doubao-seedance-2-0-260128`',
       );
-      expect(amrPrompt).toContain('### OpenDesign Cloud media defaults');
+      expect(amrPrompt).not.toContain('### OpenDesign Cloud media defaults');
       expect(amrPrompt).not.toContain('### Run-scoped BYOK media defaults');
-      expect(amrPrompt).toContain('Never invoke the `vela` CLI directly');
-      expect(amrPrompt).toContain('trusted Workspace attribution');
+      expect(amrPrompt).not.toContain('Never invoke the `vela` CLI directly');
+      expect(amrPrompt).not.toContain('trusted Workspace attribution');
 
       const claudePrompt = composeSystemPrompt({ agentId: 'claude' });
       expect(claudePrompt).not.toContain('Image model: `vela/gpt-image-2`');
-      expect(claudePrompt).toContain('`--model flux-pro-ultra`');
+      expect(claudePrompt).not.toContain('`--model flux-pro-ultra`');
     });
 
-    it('keeps image completion copy concrete while retaining internal diagnostics', () => {
+    it('does not inject provider completion or failure copy', () => {
       const imagePrompt = composeSystemPrompt({
         agentId: 'amr',
         locale: 'zh-CN',
         metadata: { kind: 'image', imageModel: 'vela/gpt-image-2' } as any,
       });
-      expect(imagePrompt).toContain('reply exactly `图片已生成`');
-      expect(imagePrompt).toContain('`error.nextStep`');
-      expect(imagePrompt).toContain(
+      expect(imagePrompt).not.toContain('reply exactly `图片已生成`');
+      expect(imagePrompt).not.toContain('`error.nextStep`');
+      expect(imagePrompt).not.toContain(
         '图片没生成出来,不是你的操作有误 —— 这次是 Open Design 自己的问题,我们已经记下了。重试一般能恢复;反复出现的话联系我们。',
       );
-      expect(imagePrompt).toContain('tool output and daemon logs');
       expect(imagePrompt).not.toContain('the filename, the model used');
       expect(imagePrompt).not.toContain('surface them verbatim to the user');
       expect(imagePrompt).not.toContain('quote the real stderr / exit code');
@@ -485,12 +481,12 @@ describe('composeSystemPrompt', () => {
         locale: 'zh-CN',
         metadata: { kind: 'prototype' } as any,
       });
-      expect(prototypePrompt).toContain('reply exactly `图片已生成`');
-      expect(prototypePrompt).toContain('`error.nextStep`');
-      expect(prototypePrompt).toContain(
+      expect(prototypePrompt).not.toContain('reply exactly `图片已生成`');
+      expect(prototypePrompt).not.toContain('`error.nextStep`');
+      expect(prototypePrompt).not.toContain(
         '图片没生成出来,不是你的操作有误 —— 这次是 Open Design 自己的问题,我们已经记下了。重试一般能恢复;反复出现的话联系我们。',
       );
-      expect(prototypePrompt).toContain('IMAGE_MODEL="vela/gpt-image-2"');
+      expect(prototypePrompt).not.toContain('IMAGE_MODEL="vela/gpt-image-2"');
       expect(prototypePrompt).not.toContain(
         'For the best fal image model use `--model flux-pro-ultra`',
       );
@@ -499,7 +495,7 @@ describe('composeSystemPrompt', () => {
     // The classified-failure branch has to reach the prompt the DAEMON
     // composes, not just the copy in packages/contracts. Reclassifying a
     // provider verdict from wording is what used to hide the real next step.
-    it('preserves the classified failure routing in both prompts', () => {
+    it('does not inject classified media-provider failure routing', () => {
       for (const metadata of [
         { kind: 'image', imageModel: 'vela/gpt-image-2' },
         { kind: 'prototype' },
@@ -509,8 +505,8 @@ describe('composeSystemPrompt', () => {
           locale: 'zh-CN',
           metadata: metadata as any,
         });
-        expect(prompt).toContain('图片模型的额度用完了 —— 重试不会恢复,去充值或换一个图片模型。');
-        expect(prompt.replace(/\s+/g, ' ')).toContain(
+        expect(prompt).not.toContain('图片模型的额度用完了 —— 重试不会恢复,去充值或换一个图片模型。');
+        expect(prompt.replace(/\s+/g, ' ')).not.toContain(
           'never re-derive a verdict from wording, HTTP status, a placeholder/stub',
         );
       }
@@ -622,14 +618,14 @@ describe('composeSystemPrompt', () => {
       expect(prompt).not.toContain('mcp__<server>__authenticate');
     });
 
-    it('keeps the media-execution-disabled block, still with no MCP directive', () => {
+    it('does not inject the removed media-execution block or MCP directive', () => {
       const prompt = composeSystemPrompt({
         metadata: { kind: 'image' },
         mediaExecution: { mode: 'disabled' },
       });
-      expect(prompt).toContain('OpenDesign-owned media execution is **disabled for this run**');
-      expect(prompt).toContain('use the fixed `unsupported` sentence');
-      expect(prompt).toContain('这次任务里不能生成图片 —— 需要图片的话,新建一个图片项目再试。');
+      expect(prompt).not.toContain('OpenDesign-owned media execution is **disabled for this run**');
+      expect(prompt).not.toContain('use the fixed `unsupported` sentence');
+      expect(prompt).not.toContain('这次任务里不能生成图片 —— 需要图片的话,新建一个图片项目再试。');
       expect(prompt).not.toContain('describe the intended creative brief');
       expect(prompt).not.toContain('## Media generation contract');
       expect(prompt).not.toContain('External MCP servers — already authenticated');

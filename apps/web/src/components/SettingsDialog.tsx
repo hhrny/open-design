@@ -33,7 +33,6 @@ import {
   trackSettingsLanguageClick,
   trackSettingsLocalCliClick,
   trackSettingsExecutionModeTabClick,
-  trackSettingsMediaProvidersClick,
   trackSettingsNotificationsClick,
   trackSettingsPrivacyClick,
   trackSettingsView,
@@ -80,14 +79,9 @@ import {
   DEFAULT_NOTIFICATIONS,
   DEFAULT_ORBIT,
   defaultKnownProviderModel,
-  isStoredMediaProviderEntryEmpty,
-  isStoredMediaProviderEntryPresent,
   KNOWN_PROVIDERS,
-  hasAnyConfiguredProvider,
-  mergeDaemonMediaProviders,
   syncComposioConfigToDaemon,
   syncConfigToDaemon,
-  syncMediaProvidersToDaemon,
 } from '../state/config';
 import type { KnownProvider } from '../state/config';
 import { navigate as navigateRoute, useRoute } from '../router';
@@ -140,12 +134,10 @@ import {
   liveArtifactPreviewUrl,
   openExternalUrl,
 } from '../providers/registry';
-import { MEDIA_PROVIDERS } from '../media/models';
 import { useByokImageModelOptions, useByokVideoModelOptions, useByokSpeechModelOptions } from '../media/aihubmix-image-models';
 import { isVisualStabilityMode } from '../utils/visualStability';
 import { byokProviderRequiresApiKey } from '../utils/byokProvider';
 import { XaiOAuthControl } from './XaiOAuthControl';
-import type { MediaProvider } from '../media/models';
 import { Toast } from './Toast';
 import {
   checkForUpdaterUpdate,
@@ -227,6 +219,7 @@ export type SettingsSection =
   | 'execution'
   | 'workspace'
   | 'instructions'
+  // Retained only as a legacy deep-link token; normalized to General.
   | 'media'
   | 'composio'
   | 'orbit'
@@ -275,6 +268,7 @@ function normalizeSettingsSection(section: SettingsSection): SettingsSection {
     case 'projectLocations':
     case 'critiqueTheater':
     case 'designSystems':
+    case 'media':
       return 'general';
     default:
       return section;
@@ -506,10 +500,6 @@ interface Props {
   onAmrLoginStatusChange?: (status: VelaLoginStatus | null) => void;
   /** Clear app-owned execution state after a confirmed active Cloud sign-out. */
   onAmrSignedOut?: () => void | Promise<void>;
-  daemonMediaProviders?: AppConfig['mediaProviders'] | null;
-  daemonMediaProvidersFetchState?: 'idle' | 'ok' | 'error';
-  mediaProvidersNotice?: string | null;
-  onReloadMediaProviders?: () => Promise<AppConfig['mediaProviders'] | null>;
   onProjectsRefresh?: () => Promise<void> | void;
   /** Same channel for skill registry mutations. */
   onSkillsChanged?: (affectedSkillId?: string) => void;
@@ -1540,10 +1530,6 @@ export function SettingsDialog({
   onRefreshAgents,
   onAmrLoginStatusChange,
   onAmrSignedOut,
-  daemonMediaProviders,
-  daemonMediaProvidersFetchState = 'idle',
-  mediaProvidersNotice,
-  onReloadMediaProviders,
   onProjectsRefresh,
   onDesignSystemsChanged,
   onDesignSystemImportRebuildJob,
@@ -1567,9 +1553,6 @@ export function SettingsDialog({
   const [maxTokensInput, setMaxTokensInput] = useState(
     initialFormConfig.maxTokens == null ? '' : String(initialFormConfig.maxTokens),
   );
-  const [pendingMediaProviderEditIds, setPendingMediaProviderEditIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
   const previousInitialRef = useRef(initial);
   // Accent only — the theme is a constant now that the app ships light-only.
   const lastSavedAppearanceRef = useRef({
@@ -3278,8 +3261,6 @@ export function SettingsDialog({
   // Composio API key — in which case we must NOT flash "All changes
   // saved", because the draft has not actually been persisted.
   const autosaveLastSavedRef = useRef<AppConfig>(normalizedInitialConfig);
-  const mediaProvidersChangeVersionRef = useRef(0);
-  const lastSyncedMediaProvidersVersionRef = useRef(0);
   const [autosaveCommitTick, setAutosaveCommitTick] = useState(0);
   const [autosaveRetryTick, setAutosaveRetryTick] = useState(0);
   autosaveLatestRef.current = cfg;
@@ -3362,30 +3343,20 @@ export function SettingsDialog({
             committedClearedProviderKey === byokProviderKeyForConfig(snapshot),
         },
       );
-      const mediaProvidersVersion = mediaProvidersChangeVersionRef.current;
-      const persistOptions = {
-        forceMediaProviderSync: mediaProvidersVersion > lastSyncedMediaProvidersVersionRef.current,
-      };
       // Draft-only edit (e.g. the user is mid-typing the Composio API
       // key, which only commits via the explicit "Save key" gesture):
       // the persisted shape would be identical to what is already on
       // disk, so a save would be a no-op that mis-reports "Saved" and
       // makes users trust that a sensitive key was persisted when it
       // was not. Skip the persist and settle the indicator to idle.
-      // The forced media-provider sync path still runs because that
-      // is a real outbound effect even when the persisted shape
-      // hasn't changed.
-      if (
-        !persistOptions.forceMediaProviderSync
-        && isAutosaveDraftOnlyChange(persistedSnapshot, autosaveLastSavedRef.current)
-      ) {
+      if (isAutosaveDraftOnlyChange(persistedSnapshot, autosaveLastSavedRef.current)) {
         settleAutosaveStatus(autosaveClaim, 'idle');
         return;
       }
       settleAutosaveStatus(autosaveClaim, 'saving');
       void (async () => {
         try {
-          await onPersist(persistedSnapshot, persistOptions);
+          await onPersist(persistedSnapshot);
           autosaveLastSavedRef.current = persistedSnapshot;
           if (
             committedClearedProviderKey
@@ -3403,10 +3374,6 @@ export function SettingsDialog({
             settleAutosaveStatus(autosaveClaim, 'pending');
             return;
           }
-          if (persistOptions.forceMediaProviderSync) {
-            lastSyncedMediaProvidersVersionRef.current = mediaProvidersVersion;
-            setPendingMediaProviderEditIds(new Set());
-          }
           settleAutosaveStatus(autosaveClaim, 'saved');
           autosaveSavedTimerRef.current = window.setTimeout(() => {
             autosaveSavedTimerRef.current = null;
@@ -3415,26 +3382,6 @@ export function SettingsDialog({
             settleAutosaveStatus(autosaveClaim, 'idle');
           }, 1800);
         } catch {
-          if (
-            persistOptions.forceMediaProviderSync
-            && autosaveLatestRef.current === snapshot
-            && mediaProvidersChangeVersionRef.current === mediaProvidersVersion
-            && lastSyncedMediaProvidersVersionRef.current < mediaProvidersVersion
-          ) {
-            settleAutosaveStatus(autosaveClaim, 'pending');
-            autosaveRetryTimerRef.current = window.setTimeout(() => {
-              autosaveRetryTimerRef.current = null;
-              if (
-                autosaveLatestRef.current !== snapshot
-                || mediaProvidersChangeVersionRef.current !== mediaProvidersVersion
-                || lastSyncedMediaProvidersVersionRef.current >= mediaProvidersVersion
-              ) {
-                return;
-              }
-              setAutosaveRetryTick((tick) => tick + 1);
-            }, 1500);
-            return;
-          }
           settleAutosaveStatus(autosaveClaim, 'error');
         }
       })();
@@ -3463,7 +3410,6 @@ export function SettingsDialog({
         autosavePendingFlushRef.current
         && !explicitOnboardingResetRef.current
       ) {
-        const mediaProvidersVersion = mediaProvidersChangeVersionRef.current;
         // Best-effort flush; if it rejects, localStorage already has
         // the latest copy from the synchronous saveConfig call inside
         // onPersist.
@@ -3477,9 +3423,7 @@ export function SettingsDialog({
               byokProviderKeyForConfig(autosaveLatestRef.current),
           },
         );
-        void Promise.resolve(onPersist(persistedSnapshot, {
-          forceMediaProviderSync: mediaProvidersVersion > lastSyncedMediaProvidersVersionRef.current,
-        })).catch(() => undefined);
+        void Promise.resolve(onPersist(persistedSnapshot)).catch(() => undefined);
       }
       if (autosaveSavedTimerRef.current != null) {
         window.clearTimeout(autosaveSavedTimerRef.current);
@@ -3941,7 +3885,7 @@ export function SettingsDialog({
       title: t('settings.instructionsTitle'),
       subtitle: t('settings.instructionsSubtitle'),
     },
-    media: { title: t('settings.mediaProviders'), subtitle: t('settings.mediaProvidersHint') },
+    media: { title: t('settings.general'), subtitle: t('settings.generalHint') },
     composio: { title: t('connectors.title'), subtitle: t('connectors.subtitle') },
     orbit: { title: t('settings.orbit.title'), subtitle: t('settings.orbit.lede') },
     routines: {
@@ -4460,17 +4404,6 @@ export function SettingsDialog({
               <span>
                 <strong>{t('settings.memory')}</strong>
                 <small>{t('settings.memoryHint')}</small>
-              </span>
-            </button>
-            <button
-              type="button"
-              className={`settings-nav-item${activeSection === 'media' ? ' active' : ''}`}
-              onClick={() => setActiveSection('media')}
-            >
-              <Icon name="image" size={18} />
-              <span>
-                <strong>{t('settings.mediaProviders')}</strong>
-                <small>Image / video / audio</small>
               </span>
             </button>
             <button
@@ -5898,24 +5831,6 @@ export function SettingsDialog({
             </>
           ) : null}
 
-          {activeSection === 'media' ? (
-            <MediaProvidersSection
-              cfg={cfg}
-              setCfg={setCfg}
-              mediaProvidersNotice={mediaProvidersNotice}
-              onReloadMediaProviders={onReloadMediaProviders}
-              pendingLocalProviderIds={pendingMediaProviderEditIds}
-              onChange={(providerId) => {
-                mediaProvidersChangeVersionRef.current += 1;
-                setPendingMediaProviderEditIds((current) => {
-                  if (current.has(providerId)) return current;
-                  const next = new Set(current);
-                  next.add(providerId);
-                  return next;
-                });
-              }}
-            />
-          ) : null}
           {activeSection === 'integrations' ? <IntegrationsSection /> : null}
 
           {activeSection === 'mcpClient' ? <McpClientSection surface="settings" /> : null}
@@ -5946,8 +5861,6 @@ export function SettingsDialog({
               cfg={cfg}
               setCfg={setCfg}
               composioApiKeyConfigured={Boolean(cfg.composio?.apiKeyConfigured)}
-              daemonMediaProviders={daemonMediaProviders}
-              daemonMediaProvidersFetchState={daemonMediaProvidersFetchState}
               workspaceContext={workspaceContext}
               onOpenComposioSection={() => setActiveSection('composio')}
               onLeaveForOrbitProject={(runConfig) => {
@@ -6824,16 +6737,9 @@ export function orbitLiveArtifactHref(
 export async function persistConfigAndRunOrbit(
   config: AppConfig,
   options?: {
-    daemonProviders?: AppConfig['mediaProviders'] | null;
-    syncMediaProviders?: boolean;
     locale?: string | null;
   },
 ): Promise<OrbitRunStartResponse> {
-  if (options?.syncMediaProviders !== false) {
-    await syncMediaProvidersToDaemon(config.mediaProviders, {
-      daemonProviders: options?.daemonProviders,
-    });
-  }
   await syncConfigToDaemon(config, { throwOnError: true });
   const response = await fetch('/api/orbit/run', {
     method: 'POST',
@@ -6893,8 +6799,6 @@ function OrbitSection({
   cfg,
   setCfg,
   composioApiKeyConfigured,
-  daemonMediaProviders,
-  daemonMediaProvidersFetchState,
   workspaceContext,
   onOpenComposioSection,
   onLeaveForOrbitProject,
@@ -6906,8 +6810,6 @@ function OrbitSection({
    *  that Orbit needs Composio first; when true (key present, just no
    *  connectors yet) it nudges the user toward the connector catalog. */
   composioApiKeyConfigured: boolean;
-  daemonMediaProviders?: AppConfig['mediaProviders'] | null;
-  daemonMediaProvidersFetchState?: 'idle' | 'ok' | 'error';
   workspaceContext: WorkspaceCollabContext | null;
   /** Switch the parent settings dialog to the Connectors (Composio) tab.
    *  Used by the Orbit gate's primary CTA so the user can fix the
@@ -7083,8 +6985,6 @@ function OrbitSection({
       try {
         const runConfig = configForManualOrbitRun(cfg, workspaceContext);
         const payload = await persistConfigAndRunOrbit(runConfig, {
-          daemonProviders: daemonMediaProviders,
-          syncMediaProviders: daemonMediaProvidersFetchState === 'ok',
           locale,
         });
         if (!payload.projectId) throw new Error('Orbit run did not return a project');
@@ -7708,511 +7608,6 @@ function OrbitSection({
   );
 }
 
-function MediaProvidersSection({
-  cfg,
-  setCfg,
-  mediaProvidersNotice,
-  onReloadMediaProviders,
-  providerModelsCache: sharedProviderModelsCache,
-  onProviderModelsCacheChange,
-  pendingLocalProviderIds,
-  onChange,
-}: {
-  cfg: AppConfig;
-  setCfg: Dispatch<SetStateAction<AppConfig>>;
-  mediaProvidersNotice?: string | null;
-  onReloadMediaProviders?: () => Promise<AppConfig['mediaProviders'] | null>;
-  providerModelsCache?: Record<string, ProviderModelOption[]>;
-  onProviderModelsCacheChange?: Dispatch<SetStateAction<Record<string, ProviderModelOption[]>>>;
-  pendingLocalProviderIds: ReadonlySet<string>;
-  onChange: (providerId: string) => void;
-}) {
-  const { t } = useI18n();
-  const analytics = useAnalytics();
-  const [reloadRunning, setReloadRunning] = useState(false);
-  const [reloadNotice, setReloadNotice] = useState<{ kind: 'error' | 'success'; message: string } | null>(null);
-  const [visibleApiKeys, setVisibleApiKeys] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  useEffect(() => {
-    setVisibleApiKeys((current) => {
-      const next = new Set<string>();
-      for (const providerId of current) {
-        const apiKey = cfg.mediaProviders?.[providerId]?.apiKey ?? '';
-        if (apiKey.trim()) next.add(providerId);
-      }
-      return next.size === current.size ? current : next;
-    });
-  }, [cfg.mediaProviders]);
-  const visibleProviders = MEDIA_PROVIDERS.filter(
-    (p) => p.settingsVisible !== false,
-  );
-  // Split the catalog into two surfaces:
-  //   - "Available" — daemon ships a real client, user can paste a key
-  //     and it works. Rendered as full editable cards.
-  //   - "Coming soon" — listed for transparency / roadmap signaling but
-  //     the daemon has no client yet, so the form fields would be
-  //     disabled placeholders. Hiding them behind a <details> keeps the
-  //     primary list focused (was 16 cards, now 8) without dropping the
-  //     informational value.
-  const availableProviders = visibleProviders
-    .filter((p) => p.integrated)
-    .slice()
-    .sort((a, b) => {
-      const aEntry = cfg.mediaProviders?.[a.id];
-      const bEntry = cfg.mediaProviders?.[b.id];
-      const aConfigured = isStoredMediaProviderEntryPresent(aEntry);
-      const bConfigured = isStoredMediaProviderEntryPresent(bEntry);
-      if (aConfigured !== bConfigured) return aConfigured ? -1 : 1;
-      return a.label.localeCompare(b.label);
-    });
-  const comingSoonProviders = visibleProviders
-    .filter((p) => !p.integrated)
-    .slice()
-    .sort((a, b) => a.label.localeCompare(b.label));
-  const updateProvider = (
-    provider: MediaProvider,
-    patch: {
-      apiKey?: string;
-      baseUrl?: string;
-      model?: string;
-      apiKeyConfigured?: boolean;
-      apiKeyTail?: string;
-    },
-  ) => {
-    onChange(provider.id);
-    setCfg((curr) => {
-      const prev = curr.mediaProviders?.[provider.id] ?? { apiKey: '', baseUrl: '', model: '' };
-      const next = { ...prev, ...patch };
-      const map = { ...(curr.mediaProviders ?? {}) };
-      if (isStoredMediaProviderEntryEmpty(next)) {
-        delete map[provider.id];
-      } else {
-        map[provider.id] = next;
-      }
-      return { ...curr, mediaProviders: map };
-    });
-  };
-  const handleReload = async () => {
-    if (!onReloadMediaProviders || reloadRunning) return;
-    setReloadRunning(true);
-    setReloadNotice(null);
-    try {
-      const next = await onReloadMediaProviders();
-      if (!next) {
-        setReloadNotice({ kind: 'error', message: t('settings.mediaProviderReloadError') });
-        return;
-      }
-      setCfg((curr) => mergeDaemonMediaProviders(curr, next, {
-        preserveLocalProviderIds: pendingLocalProviderIds,
-      }));
-      setReloadNotice({ kind: 'success', message: t('settings.mediaProviderReloadSuccess') });
-    } finally {
-      setReloadRunning(false);
-    }
-  };
-  // Successful reload acknowledgement lives on the button (✓ Reloaded)
-  // for ~2s then disappears. Keeping it as a permanent paragraph under
-  // the section header was noise — the user just clicked a button and
-  // got a visible state change, an extra "we did the thing" line is
-  // redundant. Errors stay sticky because they actually require user
-  // attention.
-  useEffect(() => {
-    if (reloadNotice?.kind !== 'success') return;
-    const handle = window.setTimeout(() => setReloadNotice(null), 2000);
-    return () => window.clearTimeout(handle);
-  }, [reloadNotice]);
-
-  const toggleApiKeyVisibility = (providerId: string) => {
-    setVisibleApiKeys((current) => {
-      const next = new Set(current);
-      if (next.has(providerId)) {
-        next.delete(providerId);
-      } else {
-        next.add(providerId);
-      }
-      return next;
-    });
-  };
-  // #5517 redesign: the section renders a pill selector (one pill per
-  // available provider, with a configured-state dot) plus ONE detail card
-  // for the selected provider, instead of a flat stack of rows.
-  //
-  // The initial selection is pinned eagerly (not left null): the pill order
-  // re-sorts live as entries become configured/cleared, so deriving the
-  // default from `availableProviders[0]` on every render would make the
-  // detail card jump to a different provider mid-edit (e.g. right after
-  // Clear). Pinning keeps the card stable; clicking a pill re-pins.
-  const [activeProviderId, setActiveProviderId] = useState<string | null>(
-    () => availableProviders[0]?.id ?? null,
-  );
-  const activeProvider = availableProviders.find((p) => p.id === activeProviderId)
-    ?? availableProviders[0]
-    ?? null;
-  // Capability chip copy is derived from the provider's marketing hint —
-  // deliberately English tags ("Image · Audio · Custom configuration"), matching
-  // the reference design.
-  const providerCapabilityLabel = (provider: MediaProvider) => {
-    const hint = provider.hint.toLowerCase();
-    const parts: string[] = [];
-    if (/image|imagen|flux|dall|banana|leonardo|gpt-image|seedream/.test(hint)) parts.push('Image');
-    if (/video|sora|veo|wan|seedance|grok-imagine/.test(hint)) parts.push('Video');
-    if (/voice|speech|audio|sfx|tts|clone/.test(hint) || provider.id === 'senseaudio') parts.push('Audio');
-    if (/research|search/.test(hint)) parts.push('Research');
-    if (provider.supportsCustomModel) parts.push('Custom configuration');
-    if (parts.length === 0) {
-      return provider.credentialsRequired === false
-        ? t('settings.mediaProviderNoKeyRequired')
-        : 'API key';
-    }
-    return parts.slice(0, 3).join(' · ');
-  };
-  const activeEntry = activeProvider
-    ? cfg.mediaProviders?.[activeProvider.id] ?? { apiKey: '', baseUrl: '', model: '' }
-    : null;
-  const activeHasPendingEdit = Boolean(activeEntry?.apiKey.trim());
-  const activeIsSavedState = Boolean(
-    activeEntry && (activeHasPendingEdit || activeEntry.apiKeyConfigured) && !activeHasPendingEdit,
-  );
-  const activeClearable = Boolean(activeEntry && isStoredMediaProviderEntryPresent(activeEntry));
-  const activeApiKeyVisible = activeProvider ? visibleApiKeys.has(activeProvider.id) : false;
-  const activeRequiresCredentials = activeProvider?.credentialsRequired !== false;
-
-  return (
-    <section className="settings-section">
-      {mediaProvidersNotice ? (
-        <p className="hint" role="alert">{mediaProvidersNotice}</p>
-      ) : null}
-      {reloadNotice && reloadNotice.kind === 'error' ? (
-        // Errors only — successful reload feedback now rides on the
-        // button (see is-success-flash above) and clears itself after
-        // 2s, so the section header doesn't get colonised by a
-        // permanent "yes I did the thing" paragraph.
-        <p className="hint" role="alert">{reloadNotice.message}</p>
-      ) : null}
-      {reloadNotice && reloadNotice.kind === 'success' ? (
-        // Off-screen announcement so assistive tech still hears the
-        // success state even though the visible feedback collapses
-        // into a transient button label change.
-        <VisuallyHidden role="status">
-          {reloadNotice.message}
-        </VisuallyHidden>
-      ) : null}
-      <div className="media-provider-page-head">
-        <div>
-          <h3>{t('settings.mediaProviders')}</h3>
-          <p>{t('settings.mediaProvidersHint')}</p>
-        </div>
-        {onReloadMediaProviders ? (
-          <button
-            type="button"
-            className={`ghost media-provider-reload-btn${
-              reloadNotice?.kind === 'success' ? ' is-success-flash' : ''
-            }`}
-            onClick={() => {
-              trackSettingsMediaProvidersClick(analytics.track, {
-                page_name: 'settings',
-                area: 'media_providers',
-                element: 'reload',
-              });
-              void handleReload();
-            }}
-            disabled={reloadRunning}
-            aria-live="polite"
-          >
-            {reloadRunning ? (
-              t('common.loading')
-            ) : reloadNotice?.kind === 'success' ? (
-              <>
-                <Icon name="check" size={13} />
-                <span style={{ marginLeft: 4 }}>{t('settings.mediaProviderReload')}</span>
-              </>
-            ) : (
-              <>
-                <Icon name="refresh" size={13} />
-                <span style={{ marginLeft: 4 }}>{t('settings.mediaProviderReload')}</span>
-              </>
-            )}
-          </button>
-        ) : null}
-      </div>
-      <div
-        className="protocol-chips protocol-chips--providers media-provider-tabs"
-        role="tablist"
-        aria-label={t('settings.mediaProviders')}
-      >
-        <div className="protocol-chip-group protocol-chip-group--providers">
-          <span className="protocol-chip-group-label">{t('settings.mediaProviderModelProviders')}</span>
-          <div className="protocol-chip-group-options">
-            {availableProviders.map((provider) => {
-              const active = activeProvider?.id === provider.id;
-              const entry = cfg.mediaProviders?.[provider.id];
-              const connected = provider.credentialsRequired === false
-                || isStoredMediaProviderEntryPresent(entry);
-              const statusLabel = connected
-                ? t('settings.mediaProviderConfigured')
-                : t('settings.mediaProviderUnset');
-              return (
-                <button
-                  key={provider.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={'protocol-chip' + (active ? ' active' : '')}
-                  title={`${provider.label} · ${statusLabel}`}
-                  onClick={() => setActiveProviderId(provider.id)}
-                >
-                  <span
-                    className={`media-provider-chip-status${connected ? ' is-connected' : ' is-disconnected'}`}
-                    aria-hidden
-                  />
-                  <span>{provider.label}</span>
-                  <VisuallyHidden>{statusLabel}</VisuallyHidden>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-      {activeProvider && activeEntry ? (
-        <article className="media-provider-detail">
-          <div className="media-provider-detail-head">
-            <div className="media-provider-meta">
-              <div className="media-provider-name-row">
-                <h3>{activeProvider.label}</h3>
-                {activeIsSavedState ? (
-                  <span
-                    className="field-status-badge field-status-badge--inline"
-                    title={t('settings.mediaProviderConfigured')}
-                  >
-                    {t('settings.mediaProviderConfigured')}
-                  </span>
-                ) : null}
-              </div>
-              <p>{activeProvider.hint || providerCapabilityLabel(activeProvider)}</p>
-            </div>
-            <div className="media-provider-badges">
-              <span className="media-provider-badge integrated">
-                {providerCapabilityLabel(activeProvider)}
-              </span>
-              {activeProvider.credentialsRequired === false ? (
-                <span className="media-provider-badge on">
-                  {t('settings.mediaProviderNoKeyRequired')}
-                </span>
-              ) : null}
-            </div>
-          </div>
-          {activeProvider.id === 'grok' ? <XaiOAuthControl /> : null}
-          {activeRequiresCredentials ? (
-            <div className="media-provider-detail-grid">
-              <label className="media-provider-detail-field">
-                <span>{t('settings.mediaProviderApiKey')}</span>
-                <div className="media-provider-secret-field">
-                  <input
-                    type={activeApiKeyVisible ? 'text' : 'password'}
-                    value={activeEntry.apiKey}
-                    placeholder={activeIsSavedState ? t('settings.connectorsReplaceKeyPlaceholder') : t('settings.mediaProviderPlaceholder')}
-                    aria-label={`${activeProvider.label} ${t('settings.mediaProviderApiKey')}`}
-                    onFocus={() => {
-                      trackSettingsMediaProvidersClick(analytics.track, {
-                        page_name: 'settings',
-                        area: 'media_providers',
-                        element: 'key_input',
-                        providers_id: activeProvider.id,
-                        is_configured: activeClearable,
-                      });
-                    }}
-                    onChange={(e) => updateProvider(activeProvider, { apiKey: e.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="secret-visibility-button"
-                    aria-label={
-                      activeApiKeyVisible
-                        ? `${activeProvider.label} ${t('settings.hideKey')}`
-                        : `${activeProvider.label} ${t('settings.showKey')}`
-                    }
-                    aria-pressed={activeApiKeyVisible}
-                    onClick={() => toggleApiKeyVisibility(activeProvider.id)}
-                  >
-                    <Icon name={activeApiKeyVisible ? 'eye' : 'eye-off'} size={15} />
-                  </button>
-                </div>
-              </label>
-              <label className="media-provider-detail-field">
-                <span>{t('settings.mediaProviderBaseUrl')}</span>
-                <input
-                  value={activeEntry.baseUrl}
-                  placeholder={activeProvider.defaultBaseUrl || t('settings.mediaProviderBaseUrlPlaceholder')}
-                  aria-label={`${activeProvider.label} ${t('settings.mediaProviderBaseUrl')}`}
-                  onFocus={() => {
-                    trackSettingsMediaProvidersClick(analytics.track, {
-                      page_name: 'settings',
-                      area: 'media_providers',
-                      element: 'url_input',
-                      providers_id: activeProvider.id,
-                      is_configured: activeClearable,
-                    });
-                  }}
-                  onChange={(e) => updateProvider(activeProvider, { baseUrl: e.target.value })}
-                />
-              </label>
-              <label className="media-provider-detail-field">
-                <span>{t('settings.mediaProviderModel')}</span>
-                <input
-                  value={activeEntry.model ?? ''}
-                  placeholder={activeProvider.customModelPlaceholder ?? t('settings.mediaProviderModelPlaceholder')}
-                  aria-label={`${activeProvider.label} ${t('settings.mediaProviderModel')}`}
-                  onChange={(e) => updateProvider(activeProvider, { model: e.target.value })}
-                />
-              </label>
-            </div>
-          ) : (
-            <div className="media-provider-no-key">
-              <Icon name="check" size={15} />
-              <div>
-                <strong>{t('settings.mediaProviderNoKeyRequired')}</strong>
-                <span>{t('settings.mediaProviderNoKeyHint')}</span>
-              </div>
-            </div>
-          )}
-          <div className="media-provider-docs-callout">
-            <div>
-              <strong>{t('settings.mediaProviderDocsTitle')}</strong>
-              <span>{t('settings.mediaProviderDocsHint')}</span>
-            </div>
-            {activeProvider.docsUrl ? (
-              <a
-                href={sanitizeHttpsUrl(activeProvider.docsUrl) ?? undefined}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ghost-link"
-              >
-                {t('settings.agentInstall.docs')}
-                <Icon name="external-link" size={14} />
-              </a>
-            ) : null}
-          </div>
-          <div className="media-provider-detail-actions">
-            <span className="hint">{t('settings.mediaProviderSaveHint')}</span>
-            <button
-              type="button"
-              className="ghost"
-              disabled={!activeClearable}
-              onClick={() => {
-                trackSettingsMediaProvidersClick(analytics.track, {
-                  page_name: 'settings',
-                  area: 'media_providers',
-                  element: 'clear',
-                  providers_id: activeProvider.id,
-                  // The click reports the state at the moment the
-                  // user pressed Clear; the actual clear only lands
-                  // after they confirm the dialog below, but the
-                  // dashboard cares about the intent signal.
-                  is_configured: activeClearable,
-                });
-                // Match the existing window.confirm guard the rest of
-                // the app uses for destructive actions (conversation
-                // delete, design delete, file delete in FileWorkspace).
-                // Without this a stray click on the Clear button wipes
-                // the saved key with no recovery. Issue #737.
-                if (
-                  !confirm(
-                    t('settings.mediaProviderClearConfirm', {
-                      name: activeProvider.label,
-                    }),
-                  )
-                ) {
-                  return;
-                }
-                updateProvider(activeProvider, {
-                  apiKey: '',
-                  baseUrl: '',
-                  model: '',
-                  apiKeyConfigured: false,
-                  apiKeyTail: '',
-                });
-              }}
-            >
-              {t('settings.mediaProviderClear')}
-            </button>
-          </div>
-        </article>
-      ) : null}
-      {comingSoonProviders.length > 0 ? (
-        // Roadmap drawer. We still want to advertise that we know
-        // these providers exist (so users don't ask "where is Fal?"),
-        // but disabled placeholder cards in the main list were noise.
-        // Closed by default — opens to a compact name + hint + docs
-        // link list, no inputs because there's nothing to wire up yet.
-        // TODO(i18n): inline English placeholders; promote to locale
-        // keys when we touch this section again.
-        <details className="library-group media-provider-coming-soon">
-          <summary className="memory-details-summary">
-            <span className="memory-details-title">
-              {t('tasks.comingSoon')}
-            </span>
-            <span className="filter-pill-count">
-              ({comingSoonProviders.length})
-            </span>
-          </summary>
-          <p className="hint" style={{ marginTop: 4, marginBottom: 8 }}>
-            {t('settings.mediaProviderComingSoonHint')}
-          </p>
-          <ul className="media-provider-coming-soon-list">
-            {comingSoonProviders.map((provider) => {
-              const docsHref = sanitizeHttpsUrl(provider.docsUrl);
-              return (
-                <li
-                  key={provider.id}
-                  className="media-provider-coming-soon-item"
-                >
-                  <div className="media-provider-coming-soon-meta">
-                    <span className="media-provider-name">
-                      {provider.label}
-                    </span>
-                    <span className="media-provider-hint">
-                      {provider.hint}
-                    </span>
-                  </div>
-                  {docsHref ? (
-                    <a
-                      href={docsHref}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ghost-link"
-                    >
-                      {t('settings.agentInstall.docs')}
-                      <Icon name="external-link" size={11} />
-                    </a>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </details>
-      ) : null}
-    </section>
-  );
-}
-
-// Per-client install paths. Each entry's `snippet` is what the user
-// copies; some clients also support a richer `deeplink` flow that
-// triggers a one-click install with an in-client approval dialog.
-//
-// Schemas drift between clients in deliberate ways. VS Code keys
-// servers under "servers" with a required "type" field; Zed uses
-// "context_servers"; Cursor, Kiro, Windsurf, and Antigravity share
-// "mcpServers"; Claude Code is best served by its CLI which writes
-// to the local config for you. Verified against each tool's official
-// docs in May 2026.
-//
-// Important: every snippet uses absolute paths to the daemon's current
-// Node-compatible runtime and built cli.js, fetched at runtime. macOS
-// and Linux ship a system /usr/bin/od (octal-dump) that shadows any
-// `od` we might add to PATH, and most OpenDesign users run from
-// source where `od` is not installed globally. The installer panel
-// must NOT reference bare `od`.
 type McpClientId =
   | 'claude'
   | 'codex'
@@ -8243,26 +7638,14 @@ interface McpStdioServerConfig {
 interface McpClient {
   id: McpClientId;
   label: string;
-  // Function so the dropdown can show different methods per OS
-  // (Claude Code uses CLI on POSIX but JSON edit on Windows because
-  // the bash/PowerShell/cmd.exe quoting is too fragile to reliably
-  // emit a single command that works in every shell).
   buildMethod: (info: McpInstallInfo) => string;
-  // Function so per-OS path hints (~/.cursor on POSIX vs
-  // %USERPROFILE%\.cursor on Windows) and shortcut differences
-  // (⌘⇧P vs Ctrl+Shift+P) can be rendered correctly.
   buildInstruction: (info: McpInstallInfo) => string;
   buildSnippet: (info: McpInstallInfo) => string;
   buildSnippetLang: (info: McpInstallInfo) => 'bash' | 'json' | 'toml';
-  // Optional one-click install action. Currently only Cursor
-  // supports deeplinks of this shape.
   buildDeeplink?: (info: McpInstallInfo) => string;
   deeplinkLabel?: () => string;
 }
 
-// Path hint per OS. Localizes the "where to paste" copy so a
-// Windows user does not see ~/.cursor/mcp.json (which their shell
-// will not expand) or a Linux user does not see %APPDATA% paths.
 function homeConfigPath(
   platform: McpInstallInfo['platform'],
   posix: string,

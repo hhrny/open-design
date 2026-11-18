@@ -11,6 +11,18 @@ runtimes. Passthrough, strategy, and legacy composition must all preserve this
 boundary. Compatibility DTO fields may remain while old projects are readable,
 but they must never add prompt text, files, or tool access to a run.
 
+## Media generation provider removal boundary
+
+Open Design no longer selects, configures, or invokes media generation
+providers. Provider credentials and model catalogs are not loaded into the web
+app, provider settings have no visible route, and all daemon media endpoints
+return `FEATURE_REMOVED`. Legacy configuration fields and implementation
+modules may remain temporarily so saved projects and non-generation file
+previews are readable, but they must not add provider names, model choices,
+credentials, `od media` commands, dispatcher contracts, or provider-specific
+voice/model guidance to any prompt path. This applies equally to legacy daemon
+composition, API/BYOK composition, slim core, and OD Next task profiles.
+
 ## The one thing to know first
 
 A generation run is composed by ONE of two independent implementations, and

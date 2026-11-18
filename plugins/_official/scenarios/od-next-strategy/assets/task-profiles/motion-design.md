@@ -295,138 +295,24 @@ that downloaded MP4 contains an audible audio track, and that key sounds occur
 at the authored times. A file extension or an audio tag alone does not prove
 sound. Silent films remain valid; never require audio for other task types.
 
-## Replicate a reference video
+## Reference-driven and video requests
 
-When the user attaches a video or gives a video link and asks to replicate it,
-make the same film, or make one "like this" (复刻, 同款, 照着这个做), the
-reference is the brief. Never rebuild a film you have not measured.
+When the user supplies a motion reference, inspect only the attached file or
+link with capabilities explicitly available in the selected runtime. Extract
+its timing, shot structure, typography, motion grammar and sound cues before
+authoring. Do not infer a full reference from a thumbnail or page copy.
 
-**A reference video makes this a video brief.** The reference is itself a
-film, so the delivery is a film: MP4 is required, the production route is
-`hyperframes-html`, and the editable source is a HyperFrames composition —
-never a standalone interactive page. Do not deliver a clickable HTML page with
-a seek bar and call the replication done; a scrollable or pausable preview
-does not replace the MP4. Words like 同款, 照着做, 参考这个风格 or a bare
-"复刻这个视频" are video requests even when the user never says "秒" or "视频".
-The only exceptions are when the user asks for a webpage, a prototype or an
-interactive demo instead, or asks only to look at the reference.
-The composition has to be film-shaped either way: an HTML-only deliverable is
-not a completed replication.
+Create an editable HTML composition as the canonical deliverable. Use actual
+seekable timeline animation, keep assets and fonts local, expose stable
+`data-od-id` hooks for editable elements, and choose a representative poster
+moment. If the selected runtime explicitly exposes a renderer, use that
+renderer and verify its output; otherwise deliver the runnable composition and
+state plainly that no video renderer is configured. Never invent an MP4 link,
+provider, credential, model, task ID or generation command.
 
-1. Measure it with the host:
-   `"$OD_NODE_BIN" "$OD_BIN" media reference --project "$OD_PROJECT_ID" --source "<attached file path or link>"`.
-   It writes `.motion-reference/<id>/`: `facts.json` (duration, size, fps,
-   audio, shot cuts), `frames/`, `contact.jpg`, `audio.wav` when the reference
-   has sound, and `REPLICATE.md` — the replication rules. Exit code 5 means the link could not be fetched; tell the
-   user the reason it printed and ask them to attach the file. Do not continue
-   from page text or a thumbnail.
-2. Read `REPLICATE.md` and follow it: it governs timing, fidelity, editable
-   structure, pictures, type, sound and the reference comparison for this film. It is
-   the same rule set Open Design's official templates are replicated with.
-3. Scaffold the film with the host, then render it — the replication is not
-   delivered until the MP4 exists:
-   `"$OD_NODE_BIN" "$OD_BIN" media scaffold --project "$OD_PROJECT_ID" --composition-dir "motion-source/film"`,
-   author the composition, then
-   `"$OD_NODE_BIN" "$OD_BIN" media generate --project "$OD_PROJECT_ID" --surface video --model hyperframes-html --composition-dir "motion-source/film" --output "<name>.mp4"`.
-4. Check it with the host:
-   `"$OD_NODE_BIN" "$OD_BIN" media compare --project "$OD_PROJECT_ID" --reference "<the video>" --candidate "<the film>"`.
-   It writes `.motion-compare/<id>/pair-NN.jpg` (reference left, your film
-   right), `sheet.jpg` and per-timestamp `ssim` scores. Read the pairs before
-   you claim the film matches — see `REPLICATE.md` for what to look at and the
-   one fix it allows.
-5. Everything else in this skill still applies: the composition contract,
-   sound policy ("Plan and produce sound for video"), production and the
-   bounded video check, where that comparison is the review.
-
-Link both the rendered MP4 and the composition source in the final reply. If
-the user then asks for a change, edit that composition and re-render the same
-MP4.
-
-References longer than 180 seconds or larger than 200 MB are refused; ask the
-user to trim the part they want.
-
-### Edit one element of an existing film
-
-When the user asks to change one thing in a film that already exists ("change
-this headline to …", "make the logo blue", "swap the product image for the one
-I attached"), find it by its `data-od-id`, its configuration key or its visible
-text, and change only that element and what is bound to it (a longer line may
-need its beat's hold or its exit cue moved; neighbours keep their timing).
-Leave every other element, beat and the sound as they are. If the description
-matches several elements, change the most prominent one and say which. Use an
-attached image by copying it into the composition's `assets/`. Re-render the
-same linked MP4 afterwards.
-
-## Video production and dual delivery
-
-For video briefs, use Open Design's existing local HyperFrames renderer during
-Build. It needs no video-generation API key. Do not ask the user to render it
-manually or run a second renderer. Plan declares `hyperframes-html` as the
-production route, editable source as canonical, and MP4 as a required derived
-output. For interactive briefs use `html` and source only.
-
-Keep source and MP4 paths in the readable plan and in the composition's MP4
-link. The exporter checks its actual output path and the declared audio policy;
-Open Design does not parse or freeze a model-authored plan. Do not add machine
-blocks or a contract-repair turn.
-
-Apply this delivery guidance only to the user's actual current video-motion
-request, including an explicit video-motion request in another project. A
-selected scenario or loaded helper alone does not authorize creating a film.
-Plan-only requests end with the plan; interactive motion and hover/scroll
-animation in a prototype remain runnable HTML. Follow-ups may directly edit an
-existing film; re-render only when the requested change affects the video.
-
-1. Scaffold a visible source directory with the native shell tool:
-   `"$OD_NODE_BIN" "$OD_BIN" media scaffold --project "$OD_PROJECT_ID" --composition-dir "motion-source/film"`.
-   Use a new descriptive directory for a new film; edit the existing source on
-   revisions. Keep `hyperframes.json`, `meta.json`, HTML and local assets there.
-2. Author `motion-source/film/index.html`. Its composition root must have
-   `data-composition-id="main"`, `data-start="0"`, `data-duration`, `data-width`,
-   `data-height` and `data-fps`. Register the seekable master timeline at
-   `window.__timelines.main`. Use actual GSAP animations, not a placeholder
-   timeline. Keep assets/fonts local and relative to this source directory.
-   Include `<meta name="od-motion-output" content="video">` and
-   `<link rel="alternate" type="video/mp4" href="../../film.mp4">` in the head.
-   The href must identify the actual planned MP4 inside the project. The
-   interactive equivalent declares `content="interactive"` and needs no MP4.
-   For video, choose a stable, representative moment in your actual timeline
-   and declare its time in seconds as `data-poster-time` on that root. It must
-   satisfy `0 <= time < data-duration`; avoid an empty opening or a transition.
-   Prefer a frame that communicates the product or main idea at thumbnail size.
-   The host validates the source/video clock and dimensions and extracts this
-   exact frame from the finished MP4. Do not generate a separate invented cover,
-   change the video's opening for the cover, or bake preview containers into it.
-3. Render through the host:
-   `"$OD_NODE_BIN" "$OD_BIN" media generate --project "$OD_PROJECT_ID" --surface video --model hyperframes-html --composition-dir "motion-source/film" --output "film.mp4"`.
-   If it returns a task ID, use `"$OD_NODE_BIN" "$OD_BIN" media wait <id>` and wait for success.
-   A queued task, HTML preview or failed command is not a completed film.
-4. Preserve the source and assets, and link BOTH the actual MP4 and the source
-   HTML in the final response using project-relative Markdown links. The file
-   viewer provides preview/download. On later video edits re-render the same
-   linked MP4 so the download matches the current source.
-
-If the host reports a renderer failure, preserve the editable source and report
-that blocker truthfully. Never fabricate a download or label HTML-only output
-as a finished video. Only actual user-requested video-motion production, and
-only when the host Core authorizes it, permits this bounded check:
-
-- During planning, retain factual invariants and exact required copy in the
-  existing Design Spec/beat map. An explainer must preserve the causal mechanism
-  and exceptions when shortening subtitles; decorative metaphors are not facts.
-- After the first render, perform one review of the actual source and exported
-  video: check the clock/dimensions, compare captions against those invariants,
-  and inspect at most three representative frames (opening, key explanation,
-  ending). Check related SVG shapes stay aligned. Use available host/browser/
-  frame tools and actually view the images; source reading alone is not visual
-  evidence. Do not claim a check that tool access did not allow.
-- If that review or the renderer identifies a concrete defect, make at most one
-  targeted repair and re-render; recheck only the affected facts/frames. If still
-  incorrect or unverifiable, report the limitation instead of certifying it.
-- Do not spawn acceptance agents, score aesthetics, add a separate pipeline
-  stage, or repeat an open-ended polish loop. Interactive motion, prototypes,
-  slides, documents and other tasks keep their existing ship-on-write policy.
-
+For follow-up edits, change only the requested element and its directly bound
+timing, then re-verify the composition. Preserve all unrelated elements,
+beats, assets and sound decisions.
 ## Quality while composing
 
 For each beat, account for focal point, motion cause, reading time and exit.

@@ -192,9 +192,7 @@ import {
   RunErrorCardAction,
 } from './chat/RunErrorCard';
 import { UpgradeCard } from './chat/UpgradeCard';
-import { SupportDialog } from './chat/SupportDialog';
 import { Toast } from './Toast';
-import { supportChannels } from './chat/support-channels';
 import { ExportLogsAction } from './chat/ExportLogsAction';
 import type { RecoveryActionBlockReason } from '../runtime/chat/recovery-gating';
 import { repoConnectCopy } from './design-system-github-evidence';
@@ -2551,7 +2549,6 @@ export function ChatPane({
     retryAssistant && !failedRunUsesCloud
     && (onSwitchToAmrAndRetry || onOpenAmrSettings),
   );
-  const [supportDialogOpen, setSupportDialogOpen] = useState(false);
   // The separate balance card retains its existing plans entry.
   const openAmrPlans = useCallback((entrySource: 'chat_upgrade_card') => {
     const attribution = recordAmrEntry(analytics.track, entrySource, new Date(), {
@@ -4603,17 +4600,6 @@ export function ChatPane({
                     actions={(
                       <>
                         {/* OPEND-2807: two standing actions and one runtime action. */}
-                        <RunErrorCardAction
-                          type="button"
-                          className="od-tooltip"
-                          variant="secondary"
-                          data-testid="chat-error-contact-support"
-                          data-tooltip={t('chat.runError.contactSupportCta')}
-                          onClick={() => setSupportDialogOpen(true)}
-                        >
-                          <Icon name="headset" size={11} />
-                          {t('chat.runError.contactSupportCta')}
-                        </RunErrorCardAction>
                         <ExportLogsAction />
                         {showCloudRetry && retryAssistant && onRetry ? (
                           <RunErrorCardAction
@@ -4849,17 +4835,6 @@ export function ChatPane({
               : null}
           </>
         ) : null}
-      {/*
-        * 联系支持弹窗(交付稿第 80 格)。**压在整个应用上**,不是报错卡里的一块 ——
-        * 组件自己走 portal 到 body,所以挂在这里不受聊天区滚动 / 层叠上下文影响。
-        * 渠道由调用方给,单一出处在 `chat/support-channels.tsx`。
-        */}
-      {supportDialogOpen ? (
-        <SupportDialog
-          channels={supportChannels(t)}
-          onClose={() => setSupportDialogOpen(false)}
-        />
-      ) : null}
       {/*
         * 重复取词的轻提示(OPEND-2546)。挂在 quote 列表的拥有者这一层,
         * 不能挂在浮条上:`handleQuote` 最后一步就是清选区,浮条当场卸载。
@@ -7300,4 +7275,3 @@ function isProgrammaticBrandAssistantMessage(message: ChatMessage | null | undef
     /程序化.*抽取|程式化.*抽取|抽取已停止/.test(content)
   );
 }
-
