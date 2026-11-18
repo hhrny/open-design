@@ -272,6 +272,7 @@ import {
   ensureManagedOpenCodeServer,
   stopManagedOpenCodeServer,
 } from './runtimes/opencode-server-manager.js';
+import { createOpenCodeServerTransport } from './runtimes/opencode-server-transport.js';
 import { TerminalControlSequenceStripper } from './runtimes/terminal-control.js';
 import { stampToolTiming } from './runtimes/tool-timing.js';
 import {
@@ -15518,24 +15519,41 @@ export async function startServer({
       // stdin protocols (Claude stream-json, JSON-RPC) keep the pipe. The
       // agent stays on record until its process group is gone, so a daemon
       // started after this one dies can reap it. See runtimes/agent-process.ts.
-      const spawnedAgent = spawnAgentProcess({
-        command: invocation.command,
-        args: invocation.args,
-        env,
-        cwd: effectiveCwd,
-        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-        stdin: stdinMode === 'pipe' && runtimeReadsPlainTextPromptFromStdin(def)
-          ? { prompt: agentStdinPromptPayload(def, composed) }
-          : stdinMode,
-        runDir: path.join(RUNTIME_DATA_DIR, 'runs', run.id),
-        runId: run.id,
-      });
-      child = spawnedAgent.child;
-      promptDeliveredAtSpawn = spawnedAgent.promptDeliveredAtSpawn;
+      let processGroupId: number | null = null;
+      if (def.id === 'opencode-server') {
+        child = createOpenCodeServerTransport({
+          cwd: effectiveCwd,
+          env,
+          model: safeModel,
+          prompt: composed,
+          reasoning: safeReasoning,
+          resumeSessionId: agentResumePromptPolicy.resumeSessionId,
+          title: 'Open Design',
+        });
+        // The native transport owns prompt delivery through HTTP. This keeps
+        // the generic stdin branch from attempting a second delivery.
+        promptDeliveredAtSpawn = true;
+      } else {
+        const spawnedAgent = spawnAgentProcess({
+          command: invocation.command,
+          args: invocation.args,
+          env,
+          cwd: effectiveCwd,
+          windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+          stdin: stdinMode === 'pipe' && runtimeReadsPlainTextPromptFromStdin(def)
+            ? { prompt: agentStdinPromptPayload(def, composed) }
+            : stdinMode,
+          runDir: path.join(RUNTIME_DATA_DIR, 'runs', run.id),
+          runId: run.id,
+        });
+        child = spawnedAgent.child;
+        promptDeliveredAtSpawn = spawnedAgent.promptDeliveredAtSpawn;
+        processGroupId = spawnedAgent.processGroupId;
+      }
       lifecycle.mark('process_spawned');
       run.child = child;
       run.childPid = typeof child.pid === 'number' ? child.pid : null;
-      run.processGroupId = spawnedAgent.processGroupId;
+      run.processGroupId = processGroupId;
       // Schedule release of the antigravity model lock once agy's
       // --log-file confirms the chosen model was propagated to the
       // backend (the upstream signal that settings.json was read).

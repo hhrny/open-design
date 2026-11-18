@@ -253,6 +253,10 @@ export type RuntimeAgentDef = {
   // RuntimeContext.hasPriorAssistantTurn comment for why double-context
   // is the discovery-form loop's root cause.
   resumesSessionViaCli?: boolean;
+  // Native server-API analogue of `resumesSessionViaCli`. No per-turn agent
+  // executable is spawned: the daemon sends the saved session id directly to
+  // a long-running HTTP/SSE server transport.
+  resumesSessionViaServer?: boolean;
   // Profile-stdio analogue of `resumesSessionViaCli`. The executable starts
   // fresh for every OD run, while the profile wire protocol accepts and
   // reports a durable session id. No CLI resume flag is involved.
@@ -379,7 +383,9 @@ export type RuntimeExecOptions = ExecFileOptions & {
 };
 
 export function runtimeResumesSessionById(
-  def: Pick<RuntimeAgentDef, 'resumesSessionViaCli' | 'resumesSessionViaProfileStdio'>,
+  def: Pick<RuntimeAgentDef, 'resumesSessionViaCli' | 'resumesSessionViaProfileStdio' | 'resumesSessionViaServer'>,
 ): boolean {
-  return def.resumesSessionViaCli === true || def.resumesSessionViaProfileStdio === true;
+  return def.resumesSessionViaCli === true
+    || def.resumesSessionViaProfileStdio === true
+    || def.resumesSessionViaServer === true;
 }

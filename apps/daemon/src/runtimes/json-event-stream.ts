@@ -243,6 +243,11 @@ function handleOpenCodeEvent(obj: unknown, onEvent: StreamEventHandler, state: P
     return true;
   }
 
+  if (obj.type === 'reasoning' && typeof part.text === 'string' && part.text.length > 0) {
+    onEvent({ type: 'thinking_delta', delta: part.text });
+    return true;
+  }
+
   if (obj.type === 'tool_use' && typeof part.tool === 'string' && typeof part.callID === 'string') {
     state.openCodeToolEvents.complete(part.callID);
     const statePart = isRecord(part.state) ? part.state : null;

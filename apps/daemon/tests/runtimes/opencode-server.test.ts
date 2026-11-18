@@ -27,46 +27,15 @@ describe('opencode-server runtime', () => {
     })).toThrow(/OPEN_DESIGN_OPENCODE_SERVER_URL/u);
   });
 
-  it('builds a network-client invocation with resume and model variant', () => {
-    const args = opencodeServerAgentDef.buildArgs(
-      'prompt travels over stdin',
-      [],
-      [],
-      { model: 'openai/gpt-5', reasoning: 'high' },
-      {
-        configuredEnv: {
-          OPEN_DESIGN_OPENCODE_SERVER_URL: 'https://agent.example.test/',
-        },
-        resumeSessionId: 'ses_remote_123',
-      },
-    );
-
-    expect(args).toEqual([
-      'run',
-      '--server',
-      'https://agent.example.test',
-      '--format',
-      'json',
-      '--auto',
-      '-s',
-      'ses_remote_123',
-      '-m',
-      'openai/gpt-5#high',
-    ]);
+  it('does not build a per-turn CLI invocation', () => {
+    expect(opencodeServerAgentDef.buildArgs()).toEqual([]);
   });
 
-  it('does not invent a model flag for the default selection', () => {
-    const args = opencodeServerAgentDef.buildArgs('', [], [], {
-      model: 'default',
-      reasoning: 'high',
-    }, {});
-    expect(args).not.toContain('-m');
-  });
-
-  it('is registered as a capture-style OpenCode event-stream runtime', () => {
+  it('is registered as a capture-style native server runtime', () => {
     expect(getAgentDef('opencode-server')).toBe(opencodeServerAgentDef);
-    expect(opencodeServerAgentDef.promptViaStdin).toBe(true);
-    expect(opencodeServerAgentDef.resumesSessionViaCli).toBe(true);
+    expect(opencodeServerAgentDef).not.toHaveProperty('promptViaStdin');
+    expect(opencodeServerAgentDef).not.toHaveProperty('resumesSessionViaCli');
+    expect(opencodeServerAgentDef.resumesSessionViaServer).toBe(true);
     expect(opencodeServerAgentDef.capturesSessionIdFromStream).toBe(true);
     expect(opencodeServerAgentDef.eventParser).toBe('opencode');
   });

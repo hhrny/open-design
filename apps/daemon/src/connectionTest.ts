@@ -2,10 +2,10 @@
 //
 //   - testProviderConnection: posts a tiny "Reply with only: ok" request to
 //     a BYOK API endpoint and reports a categorized result.
-//   - testAgentConnection: spawns a Local CLI adapter with the same prompt,
+//   - testAgentConnection: runs the selected adapter with the same prompt,
 //     drives the existing stream parser through a collector sink, and treats
-//     assistant text as proof that the CLI can run unless the text is an
-//     explicit model-selection error.
+//     assistant text as proof that the runtime can run unless the text is an
+//     explicit model-selection error. OpenCode Server uses native HTTP/SSE.
 //
 // Both functions persist nothing — no project, no chat record, no
 // media-config write. The intent is to give Settings a definite "your
@@ -65,6 +65,7 @@ import type { AgentCliEnvPrefs } from './app-config.js';
 import type { RuntimeAgentDef } from './runtimes/types.js';
 import { preparePromptFileForAgent, type PreparedPromptFile } from './runtimes/prompt-file.js';
 import { ensureManagedOpenCodeServer } from './runtimes/opencode-server-manager.js';
+import { createOpenCodeServerTransport } from './runtimes/opencode-server-transport.js';
 import { configuredAllowedInternalHosts } from './origin-validation.js';
 import {
   isAllowlistedInternalHost,
@@ -2725,13 +2726,22 @@ async function testAgentConnectionInternal(
     // *before* spawning. resultFromAgentText flips it again to
     // 'connection_smoke_test' / 'output_parse' once we get text out.
     phase = 'spawn';
-    child = spawn(invocation.command, invocation.args, {
-      env,
-      stdio: [stdinMode, 'pipe', 'pipe'],
-      cwd: tempDir,
-      shell: false,
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-    });
+    child = input.agentId === 'opencode-server'
+      ? createOpenCodeServerTransport({
+          cwd: tempDir,
+          env,
+          model,
+          prompt: SMOKE_PROMPT,
+          reasoning: input.reasoning ?? null,
+          title: 'Connection test',
+        }) as AgentChild
+      : spawn(invocation.command, invocation.args, {
+          env,
+          stdio: [stdinMode, 'pipe', 'pipe'],
+          cwd: tempDir,
+          shell: false,
+          windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+        });
     childExit = new Promise<AgentChildExit>((resolve) => {
       child!.once('error', (err) => {
         childClosed = true;

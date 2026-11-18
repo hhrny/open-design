@@ -17,12 +17,14 @@ test('opencode json stream emits text and usage events', () => {
 
   handler.feed(
     '{"type":"step_start","sessionID":"ses-1","part":{"type":"step-start"}}\n' +
+    '{"type":"reasoning","sessionID":"ses-1","part":{"text":"thinking"}}\n' +
     '{"type":"text","sessionID":"ses-1","part":{"type":"text","text":"hello"}}\n' +
     '{"type":"step_finish","sessionID":"ses-1","part":{"type":"step-finish","tokens":{"input":11,"output":7,"reasoning":3,"cache":{"read":5,"write":2}},"cost":0}}\n',
   );
 
   assert.deepEqual(events, [
     { type: 'status', label: 'running', sessionId: 'ses-1' },
+    { type: 'thinking_delta', delta: 'thinking' },
     { type: 'text_delta', delta: 'hello' },
     {
       type: 'usage',

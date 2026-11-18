@@ -954,7 +954,7 @@ const AGENT_CLI_ENV_FIELDS = [
   {
     agentId: 'opencode-server',
     envKey: 'OPENCODE_BIN',
-    label: 'OpenCode client executable path',
+    label: 'OpenCode server executable path',
     placeholder: '/absolute/path/to/opencode',
   },
 ] as const;

@@ -83,6 +83,16 @@ opencode serve --hostname 127.0.0.1 --port 4096 --print-logs
 
 daemon 关闭时，只会停止由 Open Design 自己启动的 OpenCode Server；已有的外部 Server 不会被停止。
 
+消息通信不再启动 `opencode run --server`。daemon 会直接使用 OpenCode v2 Server API：
+
+- `POST /api/session` 创建会话；
+- `POST /api/session/{sessionID}/prompt` 提交用户输入；
+- `GET /api/event` 订阅 SSE 增量事件；
+- `POST /api/session/{sessionID}/interrupt` 取消运行；
+- `GET /api/model` 获取 Server 的模型列表。
+
+因此，`OpenCode binary` 只负责在本地托管模式下启动 `opencode serve`；连接外部 Server 时，消息不会经过 OpenCode CLI。
+
 ## 4. 后台调试与日志
 
 后台启动 daemon 和 Web：
@@ -125,6 +135,7 @@ pnpm guard
 pnpm --filter @open-design/daemon exec vitest run \
   -c vitest.config.ts \
   tests/runtimes/opencode-server.test.ts \
+  tests/runtimes/opencode-server-transport.test.ts \
   tests/runtimes/opencode-server-manager.test.ts
 ```
 
@@ -194,6 +205,7 @@ pnpm --filter @open-design/daemon exec node -e "require('better-sqlite3')"
 ## 8. 相关代码
 
 - OpenCode Server 管理器：`apps/daemon/src/runtimes/opencode-server-manager.ts`
+- OpenCode Server HTTP/SSE transport：`apps/daemon/src/runtimes/opencode-server-transport.ts`
 - OpenCode Server runtime：`apps/daemon/src/runtimes/defs/opencode-server.ts`
 - daemon 启动入口：`apps/daemon/src/server.ts`
 - 中文快速上手：`docs/i18n/QUICKSTART.zh-CN.md`

@@ -3973,25 +3973,69 @@ process.stdin.on('end', () => {
     }
   });
 
-  it('launches OpenCode Server with its configured URL, password, and v2 args', async () => {
+  it('uses the configured OpenCode Server HTTP/SSE API without launching run CLI', async () => {
     const markerDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'od-opencode-server-'));
     const invocationFile = path.join(markerDir, 'invocation.json');
+    const apiRequests: Array<{ method: string; url: string; body: unknown }> = [];
+    const eventClients = new Set<http.ServerResponse>();
+    const apiServer = http.createServer(async (request, response) => {
+      const expected = `Basic ${Buffer.from('opencode:server-secret').toString('base64')}`;
+      if (request.headers.authorization !== expected) {
+        response.writeHead(401).end();
+        return;
+      }
+      if (request.url === '/api/info') {
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ version: '2.3.0' }));
+        return;
+      }
+      if (request.url === '/api/model') {
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ data: [{ id: 'gpt-5', providerID: 'openai', name: 'GPT-5', enabled: true, variants: [] }] }));
+        return;
+      }
+      if (request.url === '/api/event') {
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.flushHeaders();
+        eventClients.add(response);
+        request.on('close', () => eventClients.delete(response));
+        return;
+      }
+      let raw = '';
+      request.setEncoding('utf8');
+      for await (const chunk of request) raw += chunk;
+      const body = raw ? JSON.parse(raw) : null;
+      apiRequests.push({ method: request.method ?? '', url: request.url ?? '', body });
+      response.setHeader('content-type', 'application/json');
+      if (request.method === 'POST' && request.url === '/api/session') {
+        response.end(JSON.stringify({ data: { id: 'ses_connection_test' } }));
+        return;
+      }
+      if (request.method === 'POST' && request.url === '/api/session/ses_connection_test/prompt') {
+        response.end(JSON.stringify({ data: { id: 'msg_connection_test' } }));
+        setImmediate(() => {
+          for (const client of eventClients) {
+            client.write(`data: ${JSON.stringify({ type: 'session.text.delta', data: { sessionID: 'ses_connection_test', delta: 'ok' } })}\n\n`);
+            client.write(`data: ${JSON.stringify({ type: 'session.execution.succeeded', data: { sessionID: 'ses_connection_test' } })}\n\n`);
+          }
+        });
+        return;
+      }
+      response.writeHead(404).end(JSON.stringify({ error: 'not found' }));
+    });
+    await new Promise<void>((resolve) => apiServer.listen(0, '127.0.0.1', resolve));
+    const apiAddress = apiServer.address();
+    const apiPort = apiAddress && typeof apiAddress === 'object' ? apiAddress.port : 0;
     try {
       await withFakeOpenCode(
         `
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-let stdin = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => { stdin += chunk; });
-process.stdin.on('end', () => {
-  fs.writeFileSync(${JSON.stringify(invocationFile)}, JSON.stringify({
-    args,
-    stdin,
-    password: process.env.OPENCODE_PASSWORD,
-  }));
-  console.log(JSON.stringify({ type: 'text', part: { text: 'ok' } }));
-});
+if (args.includes('--version')) console.log('opencode v2.3.0');
+else {
+  fs.writeFileSync(${JSON.stringify(invocationFile)}, JSON.stringify(args));
+  process.exit(91);
+}
 `,
         async () => {
           const res = await realFetch(`${baseUrl}/api/test/connection`, {
@@ -4004,7 +4048,7 @@ process.stdin.on('end', () => {
               reasoning: 'high',
               agentCliEnv: {
                 'opencode-server': {
-                  OPEN_DESIGN_OPENCODE_SERVER_URL: 'https://agent.example.test/',
+                  OPEN_DESIGN_OPENCODE_SERVER_URL: `http://127.0.0.1:${apiPort}`,
                   OPENCODE_PASSWORD: 'server-secret',
                 },
               },
@@ -4019,25 +4063,26 @@ process.stdin.on('end', () => {
             model: 'openai/gpt-5',
             sample: 'ok',
           });
-          await expect(
-            fsp.readFile(invocationFile, 'utf8').then((raw) => JSON.parse(raw) as unknown),
-          ).resolves.toEqual({
-            args: [
-              'run',
-              '--server',
-              'https://agent.example.test',
-              '--format',
-              'json',
-              '--auto',
-              '-m',
-              'openai/gpt-5',
-            ],
-            stdin: 'Reply with only: ok',
-            password: 'server-secret',
-          });
+          await expect(fsp.access(invocationFile)).rejects.toThrow();
+          expect(apiRequests).toEqual([
+            expect.objectContaining({
+              method: 'POST',
+              url: '/api/session',
+              body: expect.objectContaining({
+                model: { providerID: 'openai', id: 'gpt-5' },
+              }),
+            }),
+            {
+              method: 'POST',
+              url: '/api/session/ses_connection_test/prompt',
+              body: { text: 'Reply with only: ok' },
+            },
+          ]);
         },
       );
     } finally {
+      apiServer.closeAllConnections();
+      await new Promise<void>((resolve) => apiServer.close(() => resolve()));
       await fsp.rm(markerDir, { recursive: true, force: true });
     }
   });
@@ -4060,21 +4105,60 @@ if (args[0] === 'serve') {
   const host = args[args.indexOf('--hostname') + 1];
   const port = Number(args[args.indexOf('--port') + 1]);
   const expected = 'Basic ' + Buffer.from('opencode:' + process.env.OPENCODE_SERVER_PASSWORD).toString('base64');
+  const eventClients = new Set();
   const server = http.createServer((request, response) => {
     if (request.headers.authorization !== expected) {
       response.writeHead(401).end();
       return;
     }
-    response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ version: 'test' }));
+    if (request.url === '/api/info') {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ version: 'test' }));
+      return;
+    }
+    if (request.url === '/api/model') {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ data: [] }));
+      return;
+    }
+    if (request.url === '/api/event') {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.flushHeaders();
+      eventClients.add(response);
+      request.on('close', () => eventClients.delete(response));
+      return;
+    }
+    if (request.method === 'POST' && request.url === '/api/session') {
+      request.resume();
+      request.on('end', () => {
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ data: { id: 'ses_managed_test' } }));
+      });
+      return;
+    }
+    if (request.method === 'POST' && request.url === '/api/session/ses_managed_test/prompt') {
+      request.resume();
+      request.on('end', () => {
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ data: { id: 'msg_managed_test' } }));
+        setImmediate(() => {
+          const events = [
+            { type: 'session.text.delta', data: { sessionID: 'ses_managed_test', delta: 'ok' } },
+            { type: 'session.execution.succeeded', data: { sessionID: 'ses_managed_test' } },
+          ];
+          for (const event of events) {
+            for (const client of eventClients) client.write('data: ' + JSON.stringify(event) + '\\n\\n');
+          }
+        });
+      });
+      return;
+    }
+    response.writeHead(404).end();
   });
   server.listen(port, host);
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
 } else if (args[0] === 'run') {
-  process.stdin.resume();
-  process.stdin.on('end', () => {
-    console.log(JSON.stringify({ type: 'text', part: { text: 'ok' } }));
-  });
+  process.exit(91);
 } else {
   process.exit(2);
 }

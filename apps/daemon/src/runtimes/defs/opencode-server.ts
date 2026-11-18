@@ -1,8 +1,6 @@
-import { execAgentFile } from '../invocation.js';
 import type { RuntimeAgentDef, RuntimeEnv } from '../types.js';
 import {
   OPENCODE_FALLBACK_MODELS,
-  parseOpenCodeModels,
 } from './opencode.js';
 
 export const OPEN_DESIGN_OPENCODE_SERVER_URL = 'OPEN_DESIGN_OPENCODE_SERVER_URL';
@@ -35,39 +33,64 @@ export function resolveOpenCodeServerUrl(
   return parsed.toString().replace(/\/$/, '');
 }
 
-function selectedServerModel(
-  model: string | null | undefined,
-  reasoning: string | null | undefined,
-): string | null {
-  const trimmedModel = typeof model === 'string' ? model.trim() : '';
-  if (!trimmedModel || trimmedModel === 'default') return null;
-  const trimmedReasoning = typeof reasoning === 'string' ? reasoning.trim() : '';
-  if (!trimmedReasoning || trimmedReasoning === 'default' || trimmedModel.includes('#')) {
-    return trimmedModel;
-  }
-  return `${trimmedModel}#${trimmedReasoning}`;
+function authorizationHeader(env: RuntimeEnv): string | null {
+  const password = env[OPENCODE_SERVER_CLIENT_PASSWORD]?.trim();
+  if (!password) return null;
+  return `Basic ${Buffer.from(`opencode:${password}`, 'utf8').toString('base64')}`;
 }
 
 async function fetchOpenCodeServerModels(
-  resolvedBin: string,
+  _resolvedBin: string,
   env: RuntimeEnv,
 ) {
   const serverUrl = resolveOpenCodeServerUrl(env);
-  const { stdout } = await execAgentFile(
-    resolvedBin,
-    ['models', '--server', serverUrl],
-    {
-      env,
-      timeout: 15_000,
-      maxBuffer: 8 * 1024 * 1024,
+  const authorization = authorizationHeader(env);
+  const response = await fetch(`${serverUrl}/api/model`, {
+    headers: {
+      accept: 'application/json',
+      ...(authorization ? { authorization } : {}),
     },
-  );
-  return parseOpenCodeModels(String(stdout));
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`OpenCode Server model request failed (${response.status}).`);
+  const body = await response.json() as {
+    data?: Array<{
+      enabled?: unknown;
+      id?: unknown;
+      name?: unknown;
+      providerID?: unknown;
+      variants?: Array<{ id?: unknown }>;
+    }>;
+  };
+  if (!Array.isArray(body.data)) return null;
+  const models = body.data.flatMap((entry) => {
+    if (
+      entry.enabled === false
+      || typeof entry.providerID !== 'string'
+      || typeof entry.id !== 'string'
+    ) return [];
+    const id = `${entry.providerID}/${entry.id}`;
+    const variants = Array.isArray(entry.variants)
+      ? entry.variants.flatMap((variant) => (
+          typeof variant.id === 'string' && variant.id
+            ? [{ id: variant.id, label: variant.id }]
+            : []
+        ))
+      : [];
+    return [{
+      id,
+      label: typeof entry.name === 'string' && entry.name ? entry.name : id,
+      ...(variants.length > 0 ? { reasoningOptions: variants } : {}),
+    }];
+  });
+  return models.length > 0
+    ? [OPENCODE_FALLBACK_MODELS[0]!, ...models]
+    : null;
 }
 
 /**
- * OpenCode v2 network client. The local executable is only the transport
- * client; the configured server owns sessions, providers, tools and files.
+ * OpenCode v2 native server transport. The executable is used only to start a
+ * managed local `opencode serve`; chat and model traffic use HTTP/SSE directly.
  */
 export const opencodeServerAgentDef = {
   id: 'opencode-server',
@@ -77,20 +100,8 @@ export const opencodeServerAgentDef = {
   versionArgs: ['--version'],
   fetchModels: fetchOpenCodeServerModels,
   fallbackModels: OPENCODE_FALLBACK_MODELS,
-  buildArgs: (_prompt, _imagePaths, _extra, options = {}, runtimeContext = {}) => {
-    const serverUrl = resolveOpenCodeServerUrl({
-      ...process.env,
-      ...(runtimeContext.configuredEnv ?? {}),
-    });
-    const args = ['run', '--server', serverUrl, '--format', 'json', '--auto'];
-    const resumeSessionId = runtimeContext.resumeSessionId?.trim();
-    if (resumeSessionId) args.push('-s', resumeSessionId);
-    const model = selectedServerModel(options.model, options.reasoning);
-    if (model) args.push('-m', model);
-    return args;
-  },
-  promptViaStdin: true,
-  resumesSessionViaCli: true,
+  buildArgs: () => [],
+  resumesSessionViaServer: true,
   capturesSessionIdFromStream: true,
   streamFormat: 'json-event-stream',
   eventParser: 'opencode',

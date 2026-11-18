@@ -78,6 +78,7 @@ import {
 import { agentCliEnvForAgent, readAppConfig } from './app-config.js';
 import { createJsonEventStreamHandler } from './runtimes/json-event-stream.js';
 import { ensureManagedOpenCodeServer } from './runtimes/opencode-server-manager.js';
+import { createOpenCodeServerTransport } from './runtimes/opencode-server-transport.js';
 
 const SYSTEM_PROMPT = `You are a memory extractor for a personal AI design assistant.
 
@@ -1007,6 +1008,58 @@ async function callLocalCli(provider, system, user, options) {
     user,
   ].join('\n');
 
+  if (provider.agentId === 'opencode-server') {
+    const env = applyAgentLaunchEnv(
+      spawnEnvForAgent(
+        def.id,
+        { ...process.env, ...(def.env || {}) },
+        configuredAgentEnv,
+        undefined,
+        { resolvedBin: launch.selectedPath },
+      ),
+      launch,
+    );
+    const transport = createOpenCodeServerTransport({
+      cwd,
+      env,
+      model: provider.model,
+      prompt,
+      title: 'Open Design memory extraction',
+    });
+    return await new Promise((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      const timer = setTimeout(() => {
+        transport.kill('SIGTERM');
+        reject(new Error('OpenCode Server memory extraction timed out.'));
+      }, LOCAL_CLI_TIMEOUT_MS);
+      timer.unref?.();
+      transport.stdout.setEncoding('utf8');
+      transport.stderr.setEncoding('utf8');
+      transport.stdout.on('data', (chunk) => { stdout += String(chunk); });
+      transport.stderr.on('data', (chunk) => { stderr += String(chunk); });
+      transport.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      transport.once('close', (code, signal) => {
+        clearTimeout(timer);
+        if (code !== 0 || signal) {
+          reject(new Error(
+            stderr.trim()
+              || `OpenCode Server memory extraction failed (${signal ?? `exit ${code ?? 'unknown'}`}).`,
+          ));
+          return;
+        }
+        try {
+          resolve(extractJsonEventText(def.eventParser || def.id, stdout, def.name));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
   let args;
   let stdinText = prompt;
   let parseStdout = (raw) => raw.trim();
@@ -1024,10 +1077,7 @@ async function callLocalCli(provider, system, user, options) {
       { cwd },
     );
     parseStdout = (raw) => extractJsonEventText(def.eventParser || def.id, raw, def.name);
-  } else if (
-    provider.agentId === 'opencode'
-    || provider.agentId === 'opencode-server'
-  ) {
+  } else if (provider.agentId === 'opencode') {
     // Deliver the prompt on stdin, matching the chat-run path
     // (def.promptViaStdin). `opencode run`'s `-f, --file` is a yargs array
     // option that greedily consumes every trailing non-flag token, so
